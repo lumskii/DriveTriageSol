@@ -14,19 +14,26 @@ namespace DriveTriage.Services
 
         public async Task<List<InstalledApp>> EnumerateInstalledAppsAsync(
             IProgress<string> statusUpdate,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            string? filterDriveLetter = null)
         {
             var apps = new List<InstalledApp>();
 
             await Task.Run(() =>
             {
-                statusUpdate.Report("Scanning installed applications...");
+                var driveFilter = !string.IsNullOrEmpty(filterDriveLetter) 
+                    ? filterDriveLetter.TrimEnd('\\', ':') + ":\\" 
+                    : null;
+
+                statusUpdate.Report(driveFilter != null 
+                    ? $"Scanning applications on {driveFilter}..." 
+                    : "Scanning installed applications...");
 
                 // Scan HKEY_LOCAL_MACHINE
                 foreach (var keyPath in UninstallRegistryKeys)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    ScanRegistryKey(Registry.LocalMachine, keyPath, apps, cancellationToken);
+                    ScanRegistryKey(Registry.LocalMachine, keyPath, apps, cancellationToken, driveFilter);
                 }
 
                 // Scan HKEY_CURRENT_USER
@@ -35,9 +42,10 @@ namespace DriveTriage.Services
                     Registry.CurrentUser,
                     @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
                     apps,
-                    cancellationToken);
+                    cancellationToken,
+                    driveFilter);
 
-                statusUpdate.Report($"Found {apps.Count} installed applications");
+                statusUpdate.Report($"Found {apps.Count} installed applications{(driveFilter != null ? $" on {driveFilter}" : "")}");
 
                 // Remove duplicates based on DisplayName and Publisher
                 apps = apps
@@ -55,7 +63,8 @@ namespace DriveTriage.Services
             RegistryKey rootKey,
             string keyPath,
             List<InstalledApp> apps,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            string? driveFilter)
         {
             try
             {
@@ -79,6 +88,18 @@ namespace DriveTriage.Services
                         if (IsSystemComponent(subKey) || IsUpdate(displayName))
                             continue;
 
+                        var installLocation = GetRegistryValue(subKey, "InstallLocation") ?? "";
+
+                        // Filter by drive if specified
+                        if (driveFilter != null)
+                        {
+                            if (string.IsNullOrWhiteSpace(installLocation))
+                                continue; // Skip apps without install location when filtering
+
+                            if (!installLocation.StartsWith(driveFilter, StringComparison.OrdinalIgnoreCase))
+                                continue; // Skip apps not on the specified drive
+                        }
+
                         var app = new InstalledApp
                         {
                             DisplayName = displayName,
@@ -86,7 +107,7 @@ namespace DriveTriage.Services
                             DisplayVersion = GetRegistryValue(subKey, "DisplayVersion") ?? "",
                             InstallDate = ParseInstallDate(GetRegistryValue(subKey, "InstallDate")),
                             EstimatedSize = GetEstimatedSize(subKey),
-                            InstallLocation = GetRegistryValue(subKey, "InstallLocation") ?? "",
+                            InstallLocation = installLocation,
                             UninstallString = GetRegistryValue(subKey, "UninstallString") ?? "",
                             QuietUninstallString = GetRegistryValue(subKey, "QuietUninstallString") ?? "",
                             RegistryKeyPath = $"{rootKey.Name}\\{keyPath}\\{subKeyName}"

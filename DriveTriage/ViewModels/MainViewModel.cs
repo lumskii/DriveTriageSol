@@ -14,6 +14,7 @@ namespace DriveTriage.ViewModels
         private readonly BucketsService _bucketsService;
         private readonly ReportService _reportService;
         private readonly AppsService _appsService;
+        private readonly SystemCleanupService _systemCleanupService;
         private CancellationTokenSource? _bucketsCancellationTokenSource;
         private CancellationTokenSource? _appsCancellationTokenSource;
         private double _progressValue;
@@ -22,6 +23,9 @@ namespace DriveTriage.ViewModels
         private bool _isScanningApps;
         private string _appsSearchText = string.Empty;
         private DriveInfo? _selectedDrive;
+        private bool _isScanning;
+        private double _progressPercent;
+        private SystemCleanupInfo? _systemCleanupInfo;
 
         public MainViewModel()
         {
@@ -29,6 +33,7 @@ namespace DriveTriage.ViewModels
             _bucketsService = new BucketsService();
             _reportService = new ReportService();
             _appsService = new AppsService();
+            _systemCleanupService = new SystemCleanupService();
 
             LargestFiles = new ObservableCollection<FileSystemItem>();
             LargestFolders = new ObservableCollection<FileSystemItem>();
@@ -38,8 +43,8 @@ namespace DriveTriage.ViewModels
             RestorableSessions = new ObservableCollection<CleanupSession>();
             AvailableDrives = new ObservableCollection<DriveInfo>();
 
-            LoadAvailableDrives();
-
+            // Initialize commands BEFORE loading drives
+            // This prevents NullReferenceException when SelectedDrive setter calls RaiseCanExecuteChanged
             ScanCommand = new AsyncRelayCommand(ExecuteScanAsync, CanExecuteScan);
             CancelCommand = new AsyncRelayCommand(ExecuteCancelAsync, CanExecuteCancel);
             ScanBucketsCommand = new AsyncRelayCommand(ExecuteScanBucketsAsync, CanExecuteScanBuckets);
@@ -50,6 +55,10 @@ namespace DriveTriage.ViewModels
             UninstallAppCommand = new AsyncRelayCommand<InstalledApp>(ExecuteUninstallAppAsync, CanExecuteUninstallApp);
             LoadRestorableSessionsCommand = new AsyncRelayCommand(ExecuteLoadRestorableSessionsAsync);
             RestoreSessionCommand = new AsyncRelayCommand<CleanupSession>(ExecuteRestoreSessionAsync, CanExecuteRestoreSession);
+
+            // Load drives AFTER commands are initialized
+            // This is safe because SelectedDrive setter now has ScanCommand initialized
+            LoadAvailableDrives();
         }
 
         public ObservableCollection<FileSystemItem> LargestFiles { get; }
@@ -68,6 +77,26 @@ namespace DriveTriage.ViewModels
                 _selectedDrive = value;
                 OnPropertyChanged();
                 ScanCommand.RaiseCanExecuteChanged();
+            }
+        }
+
+        public bool IsScanning
+        {
+            get => _isScanning;
+            set
+            {
+                _isScanning = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public double ProgressPercent
+        {
+            get => _progressPercent;
+            set
+            {
+                _progressPercent = value;
+                OnPropertyChanged();
             }
         }
 
@@ -178,42 +207,85 @@ namespace DriveTriage.ViewModels
                 return;
             }
 
-            LargestFiles.Clear();
-            LargestFolders.Clear();
+            IsScanning = true;
+            ProgressPercent = 0;
             ProgressValue = 0;
             StatusText = $"Scanning {SelectedDrive.Name}...";
+            ScanCommand.RaiseCanExecuteChanged();
+            CancelCommand.RaiseCanExecuteChanged();
 
-            await _scanService.ScanPathAsync(
-                rootPath: SelectedDrive.RootDirectory.FullName,
-                topN: 100,
-                progress: new Progress<double>(p => ProgressValue = p),
-                statusUpdate: new Progress<string>(s => StatusText = s),
-                onFilesFound: files =>
+            List<FileSystemItem>? filesResult = null;
+            List<FileSystemItem>? foldersResult = null;
+
+            try
+            {
+                await _scanService.ScanPathAsync(
+                    rootPath: SelectedDrive.RootDirectory.FullName,
+                    topN: 100,
+                    progress: new Progress<double>(p =>
+                    {
+                        ProgressPercent = p;
+                        ProgressValue = p;
+                    }),
+                    statusUpdate: new Progress<string>(s => StatusText = s),
+                    onFilesFound: files =>
+                    {
+                        filesResult = files;
+                    },
+                    onFoldersFound: folders =>
+                    {
+                        foldersResult = folders;
+                    });
+
+                await Application.Current.Dispatcher.InvokeAsync(() =>
                 {
                     LargestFiles.Clear();
-                    foreach (var file in files)
+                    if (filesResult != null)
                     {
-                        LargestFiles.Add(file);
+                        foreach (var file in filesResult)
+                        {
+                            LargestFiles.Add(file);
+                        }
                     }
-                },
-                onFoldersFound: folders =>
-                {
+
                     LargestFolders.Clear();
-                    foreach (var folder in folders)
+                    if (foldersResult != null)
                     {
-                        LargestFolders.Add(folder);
+                        foreach (var folder in foldersResult)
+                        {
+                            LargestFolders.Add(folder);
+                        }
                     }
                 });
 
-            StatusText = "Scan completed";
-            ScanCommand.RaiseCanExecuteChanged();
-            CancelCommand.RaiseCanExecuteChanged();
+                StatusText = "Scan completed";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText = "Scan cancelled";
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"Scan error: {ex.Message}";
+                MessageBox.Show(
+                    $"An error occurred during scanning:\n{ex.Message}",
+                    "Scan Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsScanning = false;
+                ScanCommand.RaiseCanExecuteChanged();
+                CancelCommand.RaiseCanExecuteChanged();
+            }
         }
 
         private async Task ExecuteCancelAsync()
         {
             await _scanService.CancelAsync();
             StatusText = "Scan cancelled";
+            IsScanning = false;
             ScanCommand.RaiseCanExecuteChanged();
             CancelCommand.RaiseCanExecuteChanged();
         }
@@ -314,7 +386,7 @@ namespace DriveTriage.ViewModels
 
         private bool CanExecuteScanApps()
         {
-            return !_isScanningApps;
+            return !_isScanningApps && SelectedDrive != null;
         }
 
         private bool CanExecuteCancelApps()
@@ -329,6 +401,16 @@ namespace DriveTriage.ViewModels
 
         private async Task ExecuteScanAppsAsync()
         {
+            if (SelectedDrive == null)
+            {
+                MessageBox.Show(
+                    "Please select a drive to scan for applications.",
+                    "No Drive Selected",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
             _isScanningApps = true;
             _appsCancellationTokenSource = new CancellationTokenSource();
             InstalledApps.Clear();
@@ -341,7 +423,8 @@ namespace DriveTriage.ViewModels
             {
                 var apps = await _appsService.EnumerateInstalledAppsAsync(
                     new Progress<string>(s => StatusText = s),
-                    _appsCancellationTokenSource.Token);
+                    _appsCancellationTokenSource.Token,
+                    SelectedDrive.Name);
 
                 foreach (var app in apps)
                 {
@@ -350,7 +433,7 @@ namespace DriveTriage.ViewModels
                 }
 
                 var totalSize = apps.Sum(a => a.EstimatedSize);
-                StatusText = $"Found {InstalledApps.Count} installed applications. Total size: {FormatSize(totalSize)}";
+                StatusText = $"Found {InstalledApps.Count} applications on {SelectedDrive.Name}. Total size: {FormatSize(totalSize)}";
             }
             catch (OperationCanceledException)
             {
@@ -443,6 +526,81 @@ namespace DriveTriage.ViewModels
             {
                 FilteredApps.Add(app);
             }
+        }
+
+        private async Task ExecuteSortAppsByDateAsync()
+        {
+            await Task.Run(() =>
+            {
+                var sortedApps = InstalledApps
+                    .OrderByDescending(a => a.InstallDate ?? DateTime.MinValue)
+                    .ToList();
+
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    InstalledApps.Clear();
+                    FilteredApps.Clear();
+
+                    foreach (var app in sortedApps)
+                    {
+                        InstalledApps.Add(app);
+                    }
+
+                    FilterApps();
+                });
+
+                StatusText = "Sorted by install date (newest first)";
+            });
+        }
+
+        private async Task ExecuteSortAppsBySizeAsync()
+        {
+            await Task.Run(() =>
+            {
+                var sortedApps = InstalledApps
+                    .OrderByDescending(a => a.EstimatedSize)
+                    .ToList();
+
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    InstalledApps.Clear();
+                    FilteredApps.Clear();
+
+                    foreach (var app in sortedApps)
+                    {
+                        InstalledApps.Add(app);
+                    }
+
+                    FilterApps();
+                });
+
+                StatusText = "Sorted by size (largest first)";
+            });
+        }
+
+        private async Task ExecuteSortAppsByNameAsync()
+        {
+            await Task.Run(() =>
+            {
+                var sortedApps = InstalledApps
+                    .OrderBy(a => a.DisplayName)
+                    .ToList();
+
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    InstalledApps.Clear();
+                    FilteredApps.Clear();
+
+                    foreach (var app in sortedApps)
+                    {
+                        InstalledApps.Add(app);
+                    }
+
+                    FilterApps();
+                });
+
+                StatusText = "Sorted alphabetically (A-Z)";
+            });
         }
 
         private async Task ExecuteLoadRestorableSessionsAsync()

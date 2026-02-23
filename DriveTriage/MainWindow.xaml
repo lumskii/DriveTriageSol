@@ -20,11 +20,37 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
+                    <!-- Drive Selection -->
+                    <Grid Grid.Row="0" Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" 
+                                   Text="Select Drive:" 
+                                   VerticalAlignment="Center" 
+                                   Margin="0,0,10,0"
+                                   FontWeight="SemiBold"/>
+                        <ComboBox Grid.Column="1" 
+                                  ItemsSource="{Binding AvailableDrives}"
+                                  SelectedItem="{Binding SelectedDrive}"
+                                  Height="30"
+                                  MaxWidth="600"
+                                  HorizontalAlignment="Left">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Converter={StaticResource DriveInfoConverter}}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </Grid>
+
                     <!-- Buttons -->
-                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
                         <Button Content="Scan" Width="100" Margin="0,0,10,0"
                                 Command="{Binding ScanCommand}"/>
                         <Button Content="Cancel" Width="100" 
@@ -34,27 +60,40 @@
                     <!-- Progress Bar with Percentage -->
                     <Grid Grid.Row="2" Margin="0,0,0,10">
                         <ProgressBar Height="25" 
-                                     Value="{Binding ProgressValue}" 
-                                     Maximum="100"/>
-                        <TextBlock Text="{Binding ProgressValue, StringFormat='{}{0:F0}%'}" 
-                                   HorizontalAlignment="Center" 
+                                     Value="{Binding ProgressPercent}" 
+                                     Maximum="100"
+                                     IsIndeterminate="{Binding IsScanning}"/>
+                        <TextBlock HorizontalAlignment="Center" 
                                    VerticalAlignment="Center"
                                    FontWeight="Bold"
                                    Foreground="White">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
                                     <Style.Triggers>
-                                        <DataTrigger Binding="{Binding ProgressValue}" Value="0">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        <DataTrigger Binding="{Binding IsScanning}" Value="False">
+                                            <Setter Property="Text" Value="{Binding ProgressPercent, StringFormat='{}{0:F0}%'}"/>
+                                            <Setter Property="Visibility" Value="Visible"/>
                                         </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsScanning}" Value="True">
+                                            <Setter Property="Text" Value="Scanning..."/>
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding IsScanning}" Value="False"/>
+                                                <Condition Binding="{Binding ProgressPercent}" Value="0"/>
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </MultiDataTrigger>
                                     </Style.Triggers>
                                 </Style>
                             </TextBlock.Style>
                         </TextBlock>
                     </Grid>
 
-                    <!-- Status TextBlock with Scrolling -->
-                    <Border Grid.Row="2" 
+                    <!-- Status TextBlock -->
+                    <Border Grid.Row="3" 
                             BorderBrush="#CCCCCC" 
                             BorderThickness="1" 
                             CornerRadius="3"
@@ -68,7 +107,7 @@
                     </Border>
 
                     <!-- ListViews for Files and Folders -->
-                    <Grid Grid.Row="3">
+                    <Grid Grid.Row="4">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="*"/>
@@ -152,70 +191,70 @@
 
                             <!-- Buckets Items -->
                             <ItemsControl ItemsSource="{Binding CleanupBuckets}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border BorderBrush="#CCCCCC" 
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="#CCCCCC" 
                                             BorderThickness="1" 
                                             CornerRadius="5" 
                                             Padding="15" 
                                             Margin="0,0,0,10"
                                             Background="White">
-                                        <Grid>
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="Auto"/>
-                                            </Grid.RowDefinitions>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
+                                            <Grid>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                </Grid.RowDefinitions>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
 
-                                            <!-- Bucket Name -->
-                                            <TextBlock Grid.Row="0" Grid.Column="0" 
+                                                <!-- Bucket Name -->
+                                                <TextBlock Grid.Row="0" Grid.Column="0" 
                                                        Text="{Binding Name}" 
                                                        FontSize="16" 
                                                        FontWeight="Bold" 
                                                        Margin="0,0,0,5"/>
 
-                                            <!-- Clean Button -->
-                                            <Button Grid.Row="0" Grid.Column="1" 
+                                                <!-- Clean Button -->
+                                                <Button Grid.Row="0" Grid.Column="1" 
                                                     Content="Clean" 
                                                     Width="100" 
                                                     Height="30"
                                                     Command="{Binding DataContext.CleanBucketCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding}"/>
 
-                                            <!-- Description -->
-                                            <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                                <!-- Description -->
+                                                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
                                                        Text="{Binding Description}" 
                                                        Foreground="Gray" 
                                                        Margin="0,0,0,10"
                                                        TextWrapping="Wrap"/>
 
-                                            <!-- Statistics -->
-                                            <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" 
+                                                <!-- Statistics -->
+                                                <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" 
                                                         Orientation="Horizontal" 
                                                         Margin="0,0,0,5">
-                                                <TextBlock Text="Items: " FontWeight="SemiBold"/>
-                                                <TextBlock Text="{Binding ItemCount}" Margin="0,0,20,0"/>
-                                                <TextBlock Text="Reclaimable: " FontWeight="SemiBold"/>
-                                                <TextBlock Text="{Binding ReclaimableSize}" 
+                                                    <TextBlock Text="Items: " FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding ItemCount}" Margin="0,0,20,0"/>
+                                                    <TextBlock Text="Reclaimable: " FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding ReclaimableSize}" 
                                                            Foreground="#2E7D32" 
                                                            FontWeight="Bold"/>
-                                            </StackPanel>
+                                                </StackPanel>
 
-                                            <!-- Status -->
-                                            <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2"
+                                                <!-- Status -->
+                                                <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2"
                                                        Text="{Binding StatusMessage}" 
                                                        FontStyle="Italic" 
                                                        Foreground="#666666"/>
-                                        </Grid>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                         </StackPanel>
                     </ScrollViewer>
                 </Grid>
@@ -308,7 +347,7 @@
                     </DataGrid>
 
                     <!-- Empty State -->
-                    <TextBlock Grid.Row="2"
+                    <TextBlock Grid.Row="3"
                                Text="Click 'Scan Apps' to enumerate installed applications" 
                                HorizontalAlignment="Center" 
                                VerticalAlignment="Center"
@@ -347,10 +386,16 @@
                     </StackPanel>
 
                     <!-- Sessions List -->
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
                         <StackPanel>
+                            <!-- Section Header -->
+                            <TextBlock Text="Restorable Cleanup Sessions" 
+                                       FontSize="14" 
+                                       FontWeight="Bold" 
+                                       Margin="0,0,0,10"/>
+
                             <!-- Empty State -->
-                            <TextBlock Text="Click 'Load Sessions' to view restorable cleanup operations" 
+                            <TextBlock Text="Click 'Load Sessions' to view restorable cleanup operations"
                                        HorizontalAlignment="Center" 
                                        Margin="0,50,0,0"
                                        FontSize="16" 
