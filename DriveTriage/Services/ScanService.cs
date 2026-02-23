@@ -51,11 +51,22 @@ namespace DriveTriage.Services
                             .Where(d => d.IsReady && d.DriveType == DriveType.Fixed)
                             .ToList();
 
+                        statusUpdate.Report($"Found {drives.Count} drive(s) to scan");
+
                         int driveCount = 0;
                         foreach (var drive in drives)
                         {
                             _cancellationTokenSource.Token.ThrowIfCancellationRequested();
-                            statusUpdate.Report($"Scanning {drive.Name}...");
+
+                            var driveInfo = $"Drive {driveCount + 1}/{drives.Count}: {drive.Name}";
+                            var driveSizeInfo = drive.TotalSize > 0 
+                                ? $" ({FormatSize(drive.TotalSize)} total, {FormatSize(drive.AvailableFreeSpace)} free)"
+                                : "";
+
+                            statusUpdate.Report($"🔍 Scanning {driveInfo}{driveSizeInfo}");
+
+                            var driveStartFiles = scanStats.FilesScanned;
+                            var driveStartFolders = scanStats.FoldersScanned;
 
                             try
                             {
@@ -65,6 +76,9 @@ namespace DriveTriage.Services
                                     folderSizes,
                                     scanStats,
                                     statusUpdate,
+                                    drive.Name,
+                                    driveCount + 1,
+                                    drives.Count,
                                     _cancellationTokenSource.Token);
                             }
                             catch (OperationCanceledException)
@@ -73,7 +87,12 @@ namespace DriveTriage.Services
                             }
 
                             driveCount++;
-                            progress.Report((double)driveCount / drives.Count * 100);
+                            var driveProgress = ((double)driveCount / drives.Count) * 100;
+                            progress.Report(driveProgress);
+
+                            var filesInDrive = scanStats.FilesScanned - driveStartFiles;
+                            var foldersInDrive = scanStats.FoldersScanned - driveStartFolders;
+                            statusUpdate.Report($"✅ Completed {drive.Name} - {filesInDrive:N0} files, {foldersInDrive:N0} folders ({driveProgress:F0}% complete)");
                         }
                     }
                     else
@@ -85,11 +104,14 @@ namespace DriveTriage.Services
                             folderSizes,
                             scanStats,
                             statusUpdate,
+                            rootPath,
+                            1,
+                            1,
                             _cancellationTokenSource.Token);
                         progress.Report(100);
                     }
 
-                    statusUpdate.Report($"Processed {scanStats.FilesScanned:N0} files in {scanStats.FoldersScanned:N0} folders");
+                    statusUpdate.Report($"✅ Scan Complete: {scanStats.FilesScanned:N0} files in {scanStats.FoldersScanned:N0} folders");
 
                     var largestFiles = topFiles.GetTop()
                         .Select(f => new FileSystemItem
@@ -134,6 +156,9 @@ namespace DriveTriage.Services
             ConcurrentDictionary<string, FolderInfo> folderSizes,
             ScanStatistics stats,
             IProgress<string> statusUpdate,
+            string driveName,
+            int currentDrive,
+            int totalDrives,
             CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
@@ -188,9 +213,13 @@ namespace DriveTriage.Services
 
                         stats.IncrementFiles();
 
-                        if (stats.FilesScanned % 1000 == 0)
+                        if (stats.FilesScanned % 500 == 0)
                         {
-                            statusUpdate.Report($"Scanning... ({stats.FilesScanned:N0} files, {stats.FoldersScanned:N0} folders)");
+                            var currentFolder = dirInfo.Parent?.Name ?? dirInfo.Name;
+                            if (currentFolder.Length > 40)
+                                currentFolder = "..." + currentFolder.Substring(currentFolder.Length - 37);
+
+                            statusUpdate.Report($"📁 {driveName} ({currentDrive}/{totalDrives}): {currentFolder} - {stats.FilesScanned:N0} files, {stats.FoldersScanned:N0} folders");
                         }
                     }
                     catch (UnauthorizedAccessException) { }
@@ -226,6 +255,9 @@ namespace DriveTriage.Services
                                 folderSizes,
                                 stats,
                                 statusUpdate,
+                                driveName,
+                                currentDrive,
+                                totalDrives,
                                 token);
 
                             totalSize += subDirSize;

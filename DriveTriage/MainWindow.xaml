@@ -9,6 +9,7 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisConverter"/>
         <utils:StringNotEmptyConverter x:Key="StringNotEmptyConverter"/>
+        <utils:DriveInfoConverter x:Key="DriveInfoConverter"/>
     </Window.Resources>
     <Grid Margin="10">
         <TabControl>
@@ -30,15 +31,41 @@
                                 Command="{Binding CancelCommand}"/>
                     </StackPanel>
 
-                    <!-- Progress Bar -->
-                    <ProgressBar Grid.Row="1" Height="25" Margin="0,0,0,10"
-                                 Value="{Binding ProgressValue}" 
-                                 Maximum="100"/>
+                    <!-- Progress Bar with Percentage -->
+                    <Grid Grid.Row="2" Margin="0,0,0,10">
+                        <ProgressBar Height="25" 
+                                     Value="{Binding ProgressValue}" 
+                                     Maximum="100"/>
+                        <TextBlock Text="{Binding ProgressValue, StringFormat='{}{0:F0}%'}" 
+                                   HorizontalAlignment="Center" 
+                                   VerticalAlignment="Center"
+                                   FontWeight="Bold"
+                                   Foreground="White">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ProgressValue}" Value="0">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
 
-                    <!-- Status TextBlock -->
-                    <TextBlock Grid.Row="2" Text="{Binding StatusText}" 
-                               Margin="0,0,0,10" 
-                               FontWeight="SemiBold"/>
+                    <!-- Status TextBlock with Scrolling -->
+                    <Border Grid.Row="2" 
+                            BorderBrush="#CCCCCC" 
+                            BorderThickness="1" 
+                            CornerRadius="3"
+                            Padding="10,5"
+                            Margin="0,0,0,10"
+                            Background="#F9F9F9">
+                        <TextBlock Text="{Binding StatusText}" 
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding StatusText}"/>
+                    </Border>
 
                     <!-- ListViews for Files and Folders -->
                     <Grid Grid.Row="3">

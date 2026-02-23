@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using DriveTriage.Services;
@@ -20,6 +21,7 @@ namespace DriveTriage.ViewModels
         private bool _isScanningBuckets;
         private bool _isScanningApps;
         private string _appsSearchText = string.Empty;
+        private DriveInfo? _selectedDrive;
 
         public MainViewModel()
         {
@@ -34,6 +36,9 @@ namespace DriveTriage.ViewModels
             InstalledApps = new ObservableCollection<InstalledApp>();
             FilteredApps = new ObservableCollection<InstalledApp>();
             RestorableSessions = new ObservableCollection<CleanupSession>();
+            AvailableDrives = new ObservableCollection<DriveInfo>();
+
+            LoadAvailableDrives();
 
             ScanCommand = new AsyncRelayCommand(ExecuteScanAsync, CanExecuteScan);
             CancelCommand = new AsyncRelayCommand(ExecuteCancelAsync, CanExecuteCancel);
@@ -53,6 +58,18 @@ namespace DriveTriage.ViewModels
         public ObservableCollection<InstalledApp> InstalledApps { get; }
         public ObservableCollection<InstalledApp> FilteredApps { get; }
         public ObservableCollection<CleanupSession> RestorableSessions { get; }
+        public ObservableCollection<DriveInfo> AvailableDrives { get; }
+
+        public DriveInfo? SelectedDrive
+        {
+            get => _selectedDrive;
+            set
+            {
+                _selectedDrive = value;
+                OnPropertyChanged();
+                ScanCommand.RaiseCanExecuteChanged();
+            }
+        }
 
         public double ProgressValue
         {
@@ -98,7 +115,33 @@ namespace DriveTriage.ViewModels
 
         private bool CanExecuteScan()
         {
-            return !_scanService.IsScanning;
+            return !_scanService.IsScanning && SelectedDrive != null;
+        }
+
+        private void LoadAvailableDrives()
+        {
+            try
+            {
+                var drives = DriveInfo.GetDrives()
+                    .Where(d => d.IsReady && d.DriveType == DriveType.Fixed)
+                    .OrderBy(d => d.Name)
+                    .ToList();
+
+                foreach (var drive in drives)
+                {
+                    AvailableDrives.Add(drive);
+                }
+
+                // Auto-select first drive if available
+                if (AvailableDrives.Any())
+                {
+                    SelectedDrive = AvailableDrives.First();
+                }
+            }
+            catch
+            {
+                // Handle drive enumeration errors gracefully
+            }
         }
 
         private bool CanExecuteCancel()
@@ -125,12 +168,24 @@ namespace DriveTriage.ViewModels
 
         private async Task ExecuteScanAsync()
         {
+            if (SelectedDrive == null)
+            {
+                MessageBox.Show(
+                    "Please select a drive to scan.",
+                    "No Drive Selected",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
             LargestFiles.Clear();
             LargestFolders.Clear();
             ProgressValue = 0;
-            StatusText = "Scanning...";
+            StatusText = $"Scanning {SelectedDrive.Name}...";
 
-            await _scanService.ScanAsync(
+            await _scanService.ScanPathAsync(
+                rootPath: SelectedDrive.RootDirectory.FullName,
+                topN: 100,
                 progress: new Progress<double>(p => ProgressValue = p),
                 statusUpdate: new Progress<string>(s => StatusText = s),
                 onFilesFound: files =>
