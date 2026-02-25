@@ -36,15 +36,12 @@ namespace DriveTriage.Services
             new PathPattern(@"\\AppData\\LocalLow\\", "Application data (low integrity)", PathSafetyLevel.Caution),
             new PathPattern(@"\\AppData\\Roaming\\", "Roaming application data", PathSafetyLevel.Caution),
 
-            // Development
+            // Development (source control and settings - keep as caution)
             new PathPattern(@"\\\.git\\", "Git repository", PathSafetyLevel.Caution),
             new PathPattern(@"\\\.svn\\", "SVN repository", PathSafetyLevel.Caution),
-            new PathPattern(@"\\bin\\Debug\\", "Build output (debug)", PathSafetyLevel.Caution),
-            new PathPattern(@"\\bin\\Release\\", "Build output (release)", PathSafetyLevel.Caution),
-            new PathPattern(@"\\obj\\", "Build intermediate files", PathSafetyLevel.Caution),
+            new PathPattern(@"\\\.vs\\", "Visual Studio settings", PathSafetyLevel.Caution),
 
             // Databases
-            new PathPattern(@"\\\.vs\\", "Visual Studio settings", PathSafetyLevel.Caution),
             new PathPattern(@"\.(mdf|ldf)$", "Database files", PathSafetyLevel.Caution),
         };
 
@@ -59,6 +56,14 @@ namespace DriveTriage.Services
             new PathPattern(@"\\\.cache\\", "Cache directory", PathSafetyLevel.Safe),
             new PathPattern(@"\.(tmp|temp|bak|old)$", "Temporary/backup files", PathSafetyLevel.Safe),
             new PathPattern(@"\\Desktop\\.*\.(txt|log)$", "Log files on desktop", PathSafetyLevel.Safe),
+
+            // Developer-specific safe patterns
+            new PathPattern(@"\\\.nuget\\packages\\", "NuGet global package cache", PathSafetyLevel.Safe),
+            new PathPattern(@"\\bin\\(Debug|Release)\\", "Build output folder", PathSafetyLevel.Safe),
+            new PathPattern(@"\\obj\\", "Build intermediate files", PathSafetyLevel.Safe),
+            new PathPattern(@"\\ProgramData\\Microsoft\\VisualStudio\\Packages\\", "Visual Studio package cache", PathSafetyLevel.Safe),
+            new PathPattern(@"\\Package Cache\\", "Installer package cache", PathSafetyLevel.Safe),
+            new PathPattern(@"\\NVIDIA Corporation\\(Downloader|NV_Cache)\\", "NVIDIA cache", PathSafetyLevel.Safe),
         };
 
         public static PathClassification ClassifyPath(string path)

@@ -133,6 +133,23 @@ namespace DriveTriage.Services
                 reasons.Add("✅ Node.js dependency (restorable with npm install)");
             }
 
+            // Developer-specific patterns
+            if (path.Contains("\\.nuget\\packages\\"))
+            {
+                score += 20;
+                reasons.Add("✅ NuGet package cache (restored on build/restore)");
+            }
+            if (path.Contains("\\bin\\Debug\\") || path.Contains("\\bin\\Release\\") || path.Contains("\\obj\\"))
+            {
+                score += 20;
+                reasons.Add("✅ Build artifact (regenerated on build)");
+            }
+            if (path.Contains("\\Package Cache\\") || path.Contains("\\VisualStudio\\Packages\\"))
+            {
+                score += 15;
+                reasons.Add("✅ Installer cache (re-downloaded when needed)");
+            }
+
             // Clamp score to 0-100
             score = Math.Clamp(score, 0, 100);
 

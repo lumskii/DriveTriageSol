@@ -22,7 +22,10 @@ namespace DriveTriage.Services
                 new NodeModulesBucketRule(),
                 new NvidiaCacheBucketRule(),
                 new AsusGpuTweakCacheBucketRule(),
-                new VendorCachesBucketRule()
+                new VendorCachesBucketRule(),
+                new NuGetGlobalPackagesBucketRule(),
+                new VisualStudioCacheBucketRule(),
+                new BuildArtifactsBucketRule()
             };
         }
 
@@ -55,6 +58,9 @@ namespace DriveTriage.Services
                         bucket.ReclaimableBytes = bucket.Items.Sum(i => i.Size);
                         bucket.Status = CleanupStatus.Scanned;
                         bucket.StatusMessage = $"Found {bucket.ItemCount} items ({bucket.ReclaimableSize})";
+
+                        // Generate top safety reasons for the bucket
+                        bucket.TopReasons = GenerateTopReasons(bucket.Items);
                     }
                     catch (OperationCanceledException)
                     {
@@ -181,6 +187,46 @@ namespace DriveTriage.Services
                 return relativePath;
             }
             return fullPath;
+        }
+
+        private List<string> GenerateTopReasons(List<CleanupItem> items)
+        {
+            var reasons = new List<string>();
+
+            if (items.Count == 0)
+                return reasons;
+
+            var scoringService = new ScoringService();
+            var reasonCounts = new Dictionary<string, int>();
+
+            // Sample up to 10 items to get common reasons
+            var samplesToCheck = Math.Min(items.Count, 10);
+            foreach (var item in items.Take(samplesToCheck))
+            {
+                try
+                {
+                    var result = item.Type == CleanupItemType.File
+                        ? scoringService.ScoreFile(item.Path, item.Size, item.LastModified)
+                        : scoringService.ScoreFolder(item.Path, item.Size, item.LastModified, 0);
+
+                    foreach (var reason in result.Reasons)
+                    {
+                        if (!reasonCounts.ContainsKey(reason))
+                            reasonCounts[reason] = 0;
+                        reasonCounts[reason]++;
+                    }
+                }
+                catch { }
+            }
+
+            // Return top 3-5 most common reasons
+            reasons = reasonCounts
+                .OrderByDescending(kvp => kvp.Value)
+                .Take(5)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            return reasons;
         }
 
         public string GetQuarantinePath() => _quarantinePath;
@@ -661,6 +707,303 @@ namespace DriveTriage.Services
                 }
             }
             catch { }
+        }
+    }
+
+    public class NuGetGlobalPackagesBucketRule : IBucketRule
+    {
+        public string Name => "NuGet Global Packages";
+        public string Description => "NuGet package cache (safe to delete, restored on next build/restore)";
+
+        public List<CleanupItem> ScanForItems(CancellationToken cancellationToken)
+        {
+            var items = new List<CleanupItem>();
+            var scoringService = new ScoringService();
+
+            // Check NUGET_PACKAGES environment variable first, then fall back to default location
+            var nugetPath = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
+            if (string.IsNullOrEmpty(nugetPath))
+            {
+                var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                nugetPath = Path.Combine(userProfile, ".nuget", "packages");
+            }
+
+            if (!Directory.Exists(nugetPath))
+                return items;
+
+            try
+            {
+                var dirInfo = new DirectoryInfo(nugetPath);
+
+                // Scan package folders (each package/version is a folder)
+                foreach (var packageDir in dirInfo.GetDirectories("*", SearchOption.TopDirectoryOnly))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    try
+                    {
+                        // Get all version folders for this package
+                        foreach (var versionDir in packageDir.GetDirectories("*", SearchOption.TopDirectoryOnly))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+
+                            try
+                            {
+                                var size = GetDirectorySize(versionDir, cancellationToken);
+                                var scoringResult = scoringService.ScoreFolder(versionDir.FullName, size, versionDir.LastWriteTime, 0);
+
+                                if (scoringResult.Classification != SafetyClassification.Blocked)
+                                {
+                                    items.Add(new CleanupItem
+                                    {
+                                        Path = versionDir.FullName,
+                                        Size = size,
+                                        LastModified = versionDir.LastWriteTime,
+                                        Type = CleanupItemType.Folder
+                                    });
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            return items;
+        }
+
+        private long GetDirectorySize(DirectoryInfo dir, CancellationToken cancellationToken)
+        {
+            long size = 0;
+            try
+            {
+                foreach (var file in dir.GetFiles("*", SearchOption.AllDirectories))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    try { size += file.Length; } catch { }
+                }
+            }
+            catch { }
+            return size;
+        }
+    }
+
+    public class VisualStudioCacheBucketRule : IBucketRule
+    {
+        public string Name => "Visual Studio Installer Cache";
+        public string Description => "Visual Studio installer package cache (safe to delete, re-downloaded when needed)";
+
+        private static readonly string[] CachePaths = 
+        {
+            @"C:\ProgramData\Microsoft\VisualStudio\Packages",
+            @"C:\ProgramData\Package Cache",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "VisualStudio", "Packages")
+        };
+
+        public List<CleanupItem> ScanForItems(CancellationToken cancellationToken)
+        {
+            var items = new List<CleanupItem>();
+            var scoringService = new ScoringService();
+
+            foreach (var basePath in CachePaths)
+            {
+                if (!Directory.Exists(basePath))
+                    continue;
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    var dirInfo = new DirectoryInfo(basePath);
+
+                    // Scan files directly in cache directory
+                    foreach (var file in dirInfo.GetFiles("*", SearchOption.TopDirectoryOnly))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        try
+                        {
+                            var scoringResult = scoringService.ScoreFile(file.FullName, file.Length, file.LastWriteTime);
+
+                            if (scoringResult.Classification != SafetyClassification.Blocked)
+                            {
+                                items.Add(new CleanupItem
+                                {
+                                    Path = file.FullName,
+                                    Size = file.Length,
+                                    LastModified = file.LastWriteTime,
+                                    Type = CleanupItemType.File
+                                });
+                            }
+                        }
+                        catch { }
+                    }
+
+                    // Scan cache subdirectories
+                    foreach (var dir in dirInfo.GetDirectories("*", SearchOption.TopDirectoryOnly))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        try
+                        {
+                            var size = GetDirectorySize(dir, cancellationToken);
+                            var scoringResult = scoringService.ScoreFolder(dir.FullName, size, dir.LastWriteTime, 0);
+
+                            if (scoringResult.Classification != SafetyClassification.Blocked)
+                            {
+                                items.Add(new CleanupItem
+                                {
+                                    Path = dir.FullName,
+                                    Size = size,
+                                    LastModified = dir.LastWriteTime,
+                                    Type = CleanupItemType.Folder
+                                });
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            }
+
+            return items;
+        }
+
+        private long GetDirectorySize(DirectoryInfo dir, CancellationToken cancellationToken)
+        {
+            long size = 0;
+            try
+            {
+                foreach (var file in dir.GetFiles("*", SearchOption.AllDirectories))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    try { size += file.Length; } catch { }
+                }
+            }
+            catch { }
+            return size;
+        }
+    }
+
+    public class BuildArtifactsBucketRule : IBucketRule
+    {
+        public string Name => "Build Artifacts (bin/obj)";
+        public string Description => "Build output folders (safe to delete, regenerated on next build)";
+
+        private static readonly string[] CommonProjectRoots = 
+        {
+            @"D:\Projects",
+            @"D:\Source",
+            @"D:\Dev",
+            @"D:\repos",
+            @"C:\Projects",
+            @"C:\Source",
+            @"C:\Dev",
+            @"C:\repos",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "source"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "repos"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "projects"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "dev"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "Visual Studio 2022", "Projects")
+        };
+
+        public List<CleanupItem> ScanForItems(CancellationToken cancellationToken)
+        {
+            var items = new List<CleanupItem>();
+            var scoringService = new ScoringService();
+
+            foreach (var searchPath in CommonProjectRoots)
+            {
+                if (!Directory.Exists(searchPath))
+                    continue;
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    FindBuildArtifacts(searchPath, items, scoringService, cancellationToken, maxDepth: 8);
+                }
+                catch { }
+            }
+
+            return items;
+        }
+
+        private void FindBuildArtifacts(string path, List<CleanupItem> items, ScoringService scoringService, CancellationToken cancellationToken, int maxDepth, int currentDepth = 0)
+        {
+            if (currentDepth >= maxDepth)
+                return;
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                var dirInfo = new DirectoryInfo(path);
+
+                foreach (var subDir in dirInfo.GetDirectories())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    try
+                    {
+                        var dirName = subDir.Name.ToLowerInvariant();
+
+                        // Check if this is a bin or obj folder
+                        if (dirName == "bin" || dirName == "obj")
+                        {
+                            var size = GetDirectorySize(subDir, cancellationToken);
+                            var scoringResult = scoringService.ScoreFolder(subDir.FullName, size, subDir.LastWriteTime, 0);
+
+                            if (scoringResult.Classification != SafetyClassification.Blocked)
+                            {
+                                items.Add(new CleanupItem
+                                {
+                                    Path = subDir.FullName,
+                                    Size = size,
+                                    LastModified = subDir.LastWriteTime,
+                                    Type = CleanupItemType.Folder
+                                });
+                            }
+                        }
+                        // Skip common non-project folders to speed up scanning
+                        else if (!ShouldSkipDirectory(subDir.Name))
+                        {
+                            FindBuildArtifacts(subDir.FullName, items, scoringService, cancellationToken, maxDepth, currentDepth + 1);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
+        private bool ShouldSkipDirectory(string dirName)
+        {
+            var lowerName = dirName.ToLowerInvariant();
+            return lowerName == "node_modules" ||
+                   lowerName == ".git" ||
+                   lowerName == ".svn" ||
+                   lowerName == "packages" ||
+                   lowerName == ".nuget" ||
+                   dirName.StartsWith('$') ||
+                   dirName.StartsWith('.');
+        }
+
+        private long GetDirectorySize(DirectoryInfo dir, CancellationToken cancellationToken)
+        {
+            long size = 0;
+            try
+            {
+                foreach (var file in dir.GetFiles("*", SearchOption.AllDirectories))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    try { size += file.Length; } catch { }
+                }
+            }
+            catch { }
+            return size;
         }
     }
 }

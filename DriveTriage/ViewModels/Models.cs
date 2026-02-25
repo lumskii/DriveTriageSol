@@ -19,6 +19,7 @@ namespace DriveTriage.ViewModels
         public List<CleanupItem> Items { get; set; } = new();
         public CleanupStatus Status { get; set; } = CleanupStatus.Ready;
         public string StatusMessage { get; set; } = string.Empty;
+        public List<string> TopReasons { get; set; } = new();
 
         private static string FormatSize(long bytes)
         {
