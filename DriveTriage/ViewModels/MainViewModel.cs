@@ -37,6 +37,7 @@ namespace DriveTriage.ViewModels
 
             LargestFiles = new ObservableCollection<FileSystemItem>();
             LargestFolders = new ObservableCollection<FileSystemItem>();
+            LargestProgramDataFolders = new ObservableCollection<FileSystemItem>();
             CleanupBuckets = new ObservableCollection<CleanupBucket>();
             InstalledApps = new ObservableCollection<InstalledApp>();
             FilteredApps = new ObservableCollection<InstalledApp>();
@@ -55,6 +56,7 @@ namespace DriveTriage.ViewModels
             UninstallAppCommand = new AsyncRelayCommand<InstalledApp>(ExecuteUninstallAppAsync, CanExecuteUninstallApp);
             LoadRestorableSessionsCommand = new AsyncRelayCommand(ExecuteLoadRestorableSessionsAsync);
             RestoreSessionCommand = new AsyncRelayCommand<CleanupSession>(ExecuteRestoreSessionAsync, CanExecuteRestoreSession);
+            ScanProgramDataCommand = new AsyncRelayCommand(ExecuteScanProgramDataAsync, CanExecuteScanProgramData);
 
             // Load drives AFTER commands are initialized
             // This is safe because SelectedDrive setter now has ScanCommand initialized
@@ -63,6 +65,7 @@ namespace DriveTriage.ViewModels
 
         public ObservableCollection<FileSystemItem> LargestFiles { get; }
         public ObservableCollection<FileSystemItem> LargestFolders { get; }
+        public ObservableCollection<FileSystemItem> LargestProgramDataFolders { get; }
         public ObservableCollection<CleanupBucket> CleanupBuckets { get; }
         public ObservableCollection<InstalledApp> InstalledApps { get; }
         public ObservableCollection<InstalledApp> FilteredApps { get; }
@@ -141,6 +144,7 @@ namespace DriveTriage.ViewModels
         public AsyncRelayCommand<InstalledApp> UninstallAppCommand { get; }
         public AsyncRelayCommand LoadRestorableSessionsCommand { get; }
         public AsyncRelayCommand<CleanupSession> RestoreSessionCommand { get; }
+        public AsyncRelayCommand ScanProgramDataCommand { get; }
 
         private bool CanExecuteScan()
         {
@@ -699,6 +703,73 @@ namespace DriveTriage.ViewModels
                     MessageBoxImage.Error);
 
                 StatusText = "Restore failed";
+            }
+        }
+
+        private bool CanExecuteScanProgramData()
+        {
+            return !_scanService.IsScanning;
+        }
+
+        private async Task ExecuteScanProgramDataAsync()
+        {
+            IsScanning = true;
+            ProgressPercent = 0;
+            ProgressValue = 0;
+            StatusText = "Preparing to scan C:\\ProgramData...";
+            ScanProgramDataCommand.RaiseCanExecuteChanged();
+
+            List<FileSystemItem>? foldersResult = null;
+            var cancellationTokenSource = new CancellationTokenSource();
+
+            try
+            {
+                foldersResult = await _scanService.ScanProgramDataAsync(
+                    topN: 50,
+                    progress: new Progress<double>(p =>
+                    {
+                        ProgressPercent = p;
+                        ProgressValue = p;
+                    }),
+                    statusUpdate: new Progress<string>(s => StatusText = s),
+                    cancellationToken: cancellationTokenSource.Token);
+
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    LargestProgramDataFolders.Clear();
+                    if (foldersResult != null)
+                    {
+                        foreach (var folder in foldersResult)
+                        {
+                            LargestProgramDataFolders.Add(folder);
+                        }
+                    }
+                });
+
+                StatusText = foldersResult != null && foldersResult.Any()
+                    ? $"Found {foldersResult.Count} largest ProgramData folders"
+                    : "ProgramData scan completed";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText = "ProgramData scan cancelled";
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"ProgramData scan error: {ex.Message}";
+                MessageBox.Show(
+                    $"Error scanning ProgramData:\n{ex.Message}",
+                    "Scan Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsScanning = false;
+                ProgressPercent = 0;
+                ProgressValue = 0;
+                cancellationTokenSource.Dispose();
+                ScanProgramDataCommand.RaiseCanExecuteChanged();
             }
         }
 

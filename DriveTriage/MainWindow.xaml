@@ -480,6 +480,154 @@
                     </ScrollViewer>
                 </Grid>
             </TabItem>
+
+            <!-- ProgramData Forensics Tab -->
+            <TabItem Header="ProgramData Forensics">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Description -->
+                    <Border Grid.Row="0" 
+                            BorderBrush="#E3F2FD" 
+                            BorderThickness="2" 
+                            CornerRadius="5"
+                            Padding="15" 
+                            Margin="0,0,0,10"
+                            Background="#E3F2FD">
+                        <StackPanel>
+                            <TextBlock Text="🔍 ProgramData Forensics" 
+                                       FontWeight="Bold" 
+                                       FontSize="16" 
+                                       Foreground="#1976D2"
+                                       Margin="0,0,0,5"/>
+                            <TextBlock TextWrapping="Wrap" 
+                                       Foreground="#424242">
+                                <Run Text="Quickly identifies the largest folders under C:\ProgramData to help you find space hogs from installed applications, caches, and logs."/>
+                                <LineBreak/>
+                                <Run Text="This scan is fast (1-2 levels deep) and safe - it only analyzes folder sizes, never modifies files."/>
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Scan Button -->
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+                        <Button Content="🔍 Scan ProgramData" Width="180" Height="35" Margin="0,0,10,0"
+                                Command="{Binding ScanProgramDataCommand}"
+                                FontWeight="SemiBold"/>
+                        <TextBlock Text="(Fast scan - only 1-2 levels deep)" 
+                                   VerticalAlignment="Center" 
+                                   Foreground="Gray"
+                                   FontStyle="Italic"/>
+                    </StackPanel>
+
+                    <!-- Progress Bar with Percentage -->
+                    <Grid Grid.Row="2" Margin="0,0,0,10">
+                        <ProgressBar Height="25" 
+                                     Value="{Binding ProgressPercent}" 
+                                     Maximum="100"
+                                     IsIndeterminate="{Binding IsScanning}"/>
+                        <TextBlock HorizontalAlignment="Center" 
+                                   VerticalAlignment="Center"
+                                   FontWeight="Bold"
+                                   Foreground="White">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsScanning}" Value="False">
+                                            <Setter Property="Text" Value="{Binding ProgressPercent, StringFormat='{}{0:F0}%'}"/>
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsScanning}" Value="True">
+                                            <Setter Property="Text" Value="Scanning..."/>
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding IsScanning}" Value="False"/>
+                                                <Condition Binding="{Binding ProgressPercent}" Value="0"/>
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </MultiDataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+
+                    <!-- Status TextBlock -->
+                    <Border Grid.Row="3" 
+                            BorderBrush="#CCCCCC" 
+                            BorderThickness="1" 
+                            CornerRadius="3"
+                            Padding="10,5"
+                            Margin="0,0,0,10"
+                            Background="#F9F9F9">
+                        <TextBlock Text="{Binding StatusText}" 
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding StatusText}"/>
+                    </Border>
+
+                    <!-- Results GroupBox -->
+                    <GroupBox Grid.Row="4" Header="Largest ProgramData Folders (Top 50)">
+                        <Grid>
+                            <!-- Empty State -->
+                            <TextBlock Text="Click 'Scan ProgramData' to analyze folder sizes" 
+                                       HorizontalAlignment="Center" 
+                                       VerticalAlignment="Center"
+                                       FontSize="16" 
+                                       Foreground="Gray">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding LargestProgramDataFolders.Count}" Value="0">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <!-- Results ListView -->
+                            <ListView ItemsSource="{Binding LargestProgramDataFolders}">
+                                <ListView.View>
+                                    <GridView>
+                                        <GridViewColumn Header="Folder Path" Width="450">
+                                            <GridViewColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Path}" 
+                                                               TextTrimming="CharacterEllipsis"
+                                                               ToolTip="{Binding Path}"/>
+                                                </DataTemplate>
+                                            </GridViewColumn.CellTemplate>
+                                        </GridViewColumn>
+                                        <GridViewColumn Header="Size" Width="120">
+                                            <GridViewColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Size}" 
+                                                               FontWeight="SemiBold"
+                                                               Foreground="#1976D2"
+                                                               HorizontalAlignment="Right"/>
+                                                </DataTemplate>
+                                            </GridViewColumn.CellTemplate>
+                                        </GridViewColumn>
+                                        <GridViewColumn Header="Last Modified" Width="150" 
+                                                        DisplayMemberBinding="{Binding LastModified}"/>
+                                    </GridView>
+                                </ListView.View>
+                            </ListView>
+                        </Grid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
         </TabControl>
     </Grid>
 </Window>

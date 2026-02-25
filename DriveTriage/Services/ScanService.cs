@@ -314,6 +314,145 @@ namespace DriveTriage.Services
             await Task.CompletedTask;
         }
 
+        public async Task<List<FileSystemItem>> ScanProgramDataAsync(
+            int topN,
+            IProgress<double> progress,
+            IProgress<string> statusUpdate,
+            CancellationToken cancellationToken)
+        {
+            var results = new List<FileSystemItem>();
+
+            try
+            {
+                await Task.Run(() =>
+                {
+                    var programDataPath = @"C:\ProgramData";
+
+                    if (!Directory.Exists(programDataPath))
+                    {
+                        statusUpdate.Report("❌ C:\\ProgramData not found");
+                        return;
+                    }
+
+                    statusUpdate.Report("🔍 Scanning C:\\ProgramData...");
+                    progress.Report(10);
+
+                    var folderSizes = new List<FolderInfo>();
+                    var programDataDir = new DirectoryInfo(programDataPath);
+
+                    // Scan first level (direct children of ProgramData)
+                    var level1Dirs = programDataDir.GetDirectories()
+                        .Where(d => !IsReparsePoint(d))
+                        .ToList();
+
+                    statusUpdate.Report($"Found {level1Dirs.Count} top-level folders in ProgramData");
+                    progress.Report(20);
+
+                    int processed = 0;
+                    foreach (var dir in level1Dirs)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        try
+                        {
+                            statusUpdate.Report($"Analyzing: {dir.Name}");
+
+                            long totalSize = CalculateFolderSize(dir, maxDepth: 2, cancellationToken);
+
+                            folderSizes.Add(new FolderInfo
+                            {
+                                Path = dir.FullName,
+                                TotalSize = totalSize,
+                                LastModified = dir.LastWriteTime
+                            });
+
+                            processed++;
+                            var progressPercent = 20 + (processed * 70.0 / level1Dirs.Count);
+                            progress.Report(progressPercent);
+                        }
+                        catch (UnauthorizedAccessException)
+                        {
+                            // Skip folders we can't access
+                        }
+                        catch (Exception)
+                        {
+                            // Skip problematic folders
+                        }
+                    }
+
+                    statusUpdate.Report("Sorting results by size...");
+                    progress.Report(95);
+
+                    results = folderSizes
+                        .OrderByDescending(f => f.TotalSize)
+                        .Take(topN)
+                        .Select(f => new FileSystemItem
+                        {
+                            Path = f.Path,
+                            Size = FormatSize(f.TotalSize),
+                            LastModified = f.LastModified.ToString("yyyy-MM-dd HH:mm:ss")
+                        })
+                        .ToList();
+
+                    progress.Report(100);
+                    statusUpdate.Report($"✅ Found {results.Count} largest ProgramData folders");
+
+                }, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                statusUpdate.Report("Scan cancelled");
+                throw;
+            }
+            catch (Exception ex)
+            {
+                statusUpdate.Report($"Error: {ex.Message}");
+            }
+
+            return results;
+        }
+
+        private long CalculateFolderSize(DirectoryInfo dir, int maxDepth, CancellationToken cancellationToken, int currentDepth = 0)
+        {
+            if (currentDepth >= maxDepth)
+                return 0;
+
+            long totalSize = 0;
+
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Add files in this directory
+                foreach (var file in dir.GetFiles())
+                {
+                    try
+                    {
+                        totalSize += file.Length;
+                    }
+                    catch { }
+                }
+
+                // Recursively process subdirectories
+                foreach (var subDir in dir.GetDirectories())
+                {
+                    try
+                    {
+                        if (!IsReparsePoint(subDir))
+                        {
+                            totalSize += CalculateFolderSize(subDir, maxDepth, cancellationToken, currentDepth + 1);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch (UnauthorizedAccessException) { }
+            catch (DirectoryNotFoundException) { }
+            catch (IOException) { }
+
+            return totalSize;
+        }
+
         private class FileMetadata : IComparable<FileMetadata>
         {
             public required string Path { get; init; }
