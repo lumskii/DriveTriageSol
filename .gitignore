@@ -361,3 +361,18 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# ═══════════════════════════════════════════════════════════
+# DriveTriage Custom Rules
+# ═══════════════════════════════════════════════════════════
+
+# Ignore all markdown files
+*.md
+
+# EXCEPT README files (case-insensitive)
+!README.md
+!readme.md
+!Readme.md
+!ReadMe.md
+!README.MD
+!readme.MD
