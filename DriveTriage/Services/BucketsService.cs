@@ -19,7 +19,10 @@ namespace DriveTriage.Services
             {
                 new UserTempBucketRule(),
                 new DownloadsInstallersBucketRule(),
-                new NodeModulesBucketRule()
+                new NodeModulesBucketRule(),
+                new NvidiaCacheBucketRule(),
+                new AsusGpuTweakCacheBucketRule(),
+                new VendorCachesBucketRule()
             };
         }
 
@@ -412,6 +415,252 @@ namespace DriveTriage.Services
             }
             catch { }
             return size;
+        }
+    }
+
+    public class NvidiaCacheBucketRule : IBucketRule
+    {
+        public string Name => "NVIDIA Cache";
+        public string Description => "NVIDIA driver cache and downloader files (safe to delete, will be recreated as needed)";
+
+        private static readonly string[] NvidiaPaths = 
+        {
+            @"C:\ProgramData\NVIDIA Corporation\Downloader",
+            @"C:\ProgramData\NVIDIA Corporation\NV_Cache"
+        };
+
+        public List<CleanupItem> ScanForItems(CancellationToken cancellationToken)
+        {
+            var items = new List<CleanupItem>();
+            var scoringService = new ScoringService();
+
+            foreach (var basePath in NvidiaPaths)
+            {
+                if (!Directory.Exists(basePath))
+                    continue;
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    var dirInfo = new DirectoryInfo(basePath);
+
+                    foreach (var file in dirInfo.GetFiles("*", SearchOption.AllDirectories))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        try
+                        {
+                            var scoringResult = scoringService.ScoreFile(file.FullName, file.Length, file.LastWriteTime);
+
+                            if (scoringResult.Classification != SafetyClassification.Blocked)
+                            {
+                                items.Add(new CleanupItem
+                                {
+                                    Path = file.FullName,
+                                    Size = file.Length,
+                                    LastModified = file.LastWriteTime,
+                                    Type = CleanupItemType.File
+                                });
+                            }
+                        }
+                        catch { }
+                    }
+
+                    foreach (var dir in dirInfo.GetDirectories("*", SearchOption.TopDirectoryOnly))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        try
+                        {
+                            var size = GetDirectorySize(dir, cancellationToken);
+                            var scoringResult = scoringService.ScoreFolder(dir.FullName, size, dir.LastWriteTime, 0);
+
+                            if (scoringResult.Classification != SafetyClassification.Blocked)
+                            {
+                                items.Add(new CleanupItem
+                                {
+                                    Path = dir.FullName,
+                                    Size = size,
+                                    LastModified = dir.LastWriteTime,
+                                    Type = CleanupItemType.Folder
+                                });
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            }
+
+            return items;
+        }
+
+        private long GetDirectorySize(DirectoryInfo dir, CancellationToken cancellationToken)
+        {
+            long size = 0;
+            try
+            {
+                foreach (var file in dir.GetFiles("*", SearchOption.AllDirectories))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    try { size += file.Length; } catch { }
+                }
+            }
+            catch { }
+            return size;
+        }
+    }
+
+    public class AsusGpuTweakCacheBucketRule : IBucketRule
+    {
+        public string Name => "ASUS GPU Tweak Cache";
+        public string Description => "ASUS GPU Tweak temporary files (logs, cache, updates - program files are never touched)";
+
+        private static readonly string BaseAsusPath = @"C:\Program Files (x86)\ASUS\GPU TweakII";
+        private static readonly string[] SafeSubfolders = { "logs", "cache", "temp", "update", "Logs", "Cache", "Temp", "Update" };
+
+        public List<CleanupItem> ScanForItems(CancellationToken cancellationToken)
+        {
+            var items = new List<CleanupItem>();
+            var scoringService = new ScoringService();
+
+            if (!Directory.Exists(BaseAsusPath))
+                return items;
+
+            try
+            {
+                var baseDir = new DirectoryInfo(BaseAsusPath);
+
+                foreach (var subDir in baseDir.GetDirectories("*", SearchOption.TopDirectoryOnly))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    if (!SafeSubfolders.Contains(subDir.Name, StringComparer.OrdinalIgnoreCase))
+                        continue;
+
+                    try
+                    {
+                        foreach (var file in subDir.GetFiles("*", SearchOption.AllDirectories))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+
+                            try
+                            {
+                                var scoringResult = scoringService.ScoreFile(file.FullName, file.Length, file.LastWriteTime);
+
+                                if (scoringResult.Classification != SafetyClassification.Blocked)
+                                {
+                                    items.Add(new CleanupItem
+                                    {
+                                        Path = file.FullName,
+                                        Size = file.Length,
+                                        LastModified = file.LastWriteTime,
+                                        Type = CleanupItemType.File
+                                    });
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            return items;
+        }
+    }
+
+    public class VendorCachesBucketRule : IBucketRule
+    {
+        public string Name => "Vendor Cache Folders";
+        public string Description => "Generic vendor temporary files (Logs, Cache, Temp, Downloader subfolders under ProgramData and Program Files)";
+
+        private static readonly string[] VendorBasePaths = 
+        {
+            @"C:\ProgramData",
+            @"C:\Program Files (x86)"
+        };
+
+        private static readonly string[] CacheFolderNames = { "Logs", "Cache", "Temp", "Downloader", "logs", "cache", "temp", "downloader" };
+
+        public List<CleanupItem> ScanForItems(CancellationToken cancellationToken)
+        {
+            var items = new List<CleanupItem>();
+            var scoringService = new ScoringService();
+
+            foreach (var basePath in VendorBasePaths)
+            {
+                if (!Directory.Exists(basePath))
+                    continue;
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    var baseDir = new DirectoryInfo(basePath);
+
+                    foreach (var vendorDir in baseDir.GetDirectories("*", SearchOption.TopDirectoryOnly))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        if (vendorDir.Name.Equals("Microsoft", StringComparison.OrdinalIgnoreCase) ||
+                            vendorDir.Name.Equals("Windows", StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        try
+                        {
+                            ScanVendorDirectory(vendorDir, items, scoringService, cancellationToken);
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            }
+
+            return items;
+        }
+
+        private void ScanVendorDirectory(DirectoryInfo vendorDir, List<CleanupItem> items, ScoringService scoringService, CancellationToken cancellationToken)
+        {
+            try
+            {
+                foreach (var subDir in vendorDir.GetDirectories("*", SearchOption.AllDirectories))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    if (!CacheFolderNames.Contains(subDir.Name, StringComparer.OrdinalIgnoreCase))
+                        continue;
+
+                    try
+                    {
+                        foreach (var file in subDir.GetFiles("*", SearchOption.AllDirectories))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+
+                            try
+                            {
+                                var scoringResult = scoringService.ScoreFile(file.FullName, file.Length, file.LastWriteTime);
+
+                                if (scoringResult.Classification != SafetyClassification.Blocked)
+                                {
+                                    items.Add(new CleanupItem
+                                    {
+                                        Path = file.FullName,
+                                        Size = file.Length,
+                                        LastModified = file.LastWriteTime,
+                                        Type = CleanupItemType.File
+                                    });
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
         }
     }
 }
