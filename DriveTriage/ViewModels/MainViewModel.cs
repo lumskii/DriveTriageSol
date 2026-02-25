@@ -15,6 +15,7 @@ namespace DriveTriage.ViewModels
         private readonly ReportService _reportService;
         private readonly AppsService _appsService;
         private readonly SystemCleanupService _systemCleanupService;
+        private readonly DriverCacheService _driverCacheService;
         private CancellationTokenSource? _bucketsCancellationTokenSource;
         private CancellationTokenSource? _appsCancellationTokenSource;
         private double _progressValue;
@@ -34,6 +35,7 @@ namespace DriveTriage.ViewModels
             _reportService = new ReportService();
             _appsService = new AppsService();
             _systemCleanupService = new SystemCleanupService();
+            _driverCacheService = new DriverCacheService();
 
             LargestFiles = new ObservableCollection<FileSystemItem>();
             LargestFolders = new ObservableCollection<FileSystemItem>();
@@ -57,10 +59,17 @@ namespace DriveTriage.ViewModels
             LoadRestorableSessionsCommand = new AsyncRelayCommand(ExecuteLoadRestorableSessionsAsync);
             RestoreSessionCommand = new AsyncRelayCommand<CleanupSession>(ExecuteRestoreSessionAsync, CanExecuteRestoreSession);
             ScanProgramDataCommand = new AsyncRelayCommand(ExecuteScanProgramDataAsync, CanExecuteScanProgramData);
+            RefreshSystemCleanupInfoCommand = new AsyncRelayCommand(ExecuteRefreshSystemCleanupInfoAsync);
+            PurgeNvidiaCacheCommand = new AsyncRelayCommand(ExecutePurgeNvidiaCacheAsync);
+            EmptyRecycleBinCommand = new AsyncRelayCommand(ExecuteEmptyRecycleBinAsync);
+            CleanQuarantineCommand = new AsyncRelayCommand(ExecuteCleanQuarantineAsync);
 
             // Load drives AFTER commands are initialized
             // This is safe because SelectedDrive setter now has ScanCommand initialized
             LoadAvailableDrives();
+
+            // Load system cleanup info
+            _ = ExecuteRefreshSystemCleanupInfoAsync();
         }
 
         public ObservableCollection<FileSystemItem> LargestFiles { get; }
@@ -134,6 +143,16 @@ namespace DriveTriage.ViewModels
             }
         }
 
+        public SystemCleanupInfo? SystemCleanupInfo
+        {
+            get => _systemCleanupInfo;
+            set
+            {
+                _systemCleanupInfo = value;
+                OnPropertyChanged();
+            }
+        }
+
         public AsyncRelayCommand ScanCommand { get; }
         public AsyncRelayCommand CancelCommand { get; }
         public AsyncRelayCommand ScanBucketsCommand { get; }
@@ -145,6 +164,10 @@ namespace DriveTriage.ViewModels
         public AsyncRelayCommand LoadRestorableSessionsCommand { get; }
         public AsyncRelayCommand<CleanupSession> RestoreSessionCommand { get; }
         public AsyncRelayCommand ScanProgramDataCommand { get; }
+        public AsyncRelayCommand RefreshSystemCleanupInfoCommand { get; }
+        public AsyncRelayCommand PurgeNvidiaCacheCommand { get; }
+        public AsyncRelayCommand EmptyRecycleBinCommand { get; }
+        public AsyncRelayCommand CleanQuarantineCommand { get; }
 
         private bool CanExecuteScan()
         {
@@ -770,6 +793,205 @@ namespace DriveTriage.ViewModels
                 ProgressValue = 0;
                 cancellationTokenSource.Dispose();
                 ScanProgramDataCommand.RaiseCanExecuteChanged();
+            }
+        }
+
+        private async Task ExecuteRefreshSystemCleanupInfoAsync()
+        {
+            try
+            {
+                StatusText = "Refreshing system cleanup info...";
+                var info = await _systemCleanupService.GetSystemCleanupInfoAsync();
+
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    SystemCleanupInfo = info;
+                });
+
+                StatusText = "System cleanup info updated";
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"Error refreshing info: {ex.Message}";
+            }
+        }
+
+        private async Task ExecutePurgeNvidiaCacheAsync()
+        {
+            var result = MessageBox.Show(
+                "Purge NVIDIA Cache?\n\n" +
+                $"This will delete all files from:\n" +
+                "• C:\\ProgramData\\NVIDIA Corporation\\Downloader\n" +
+                "• C:\\ProgramData\\NVIDIA Corporation\\NV_Cache\n" +
+                "• C:\\NVIDIA (if present)\n\n" +
+                "NVIDIA drivers will re-download needed files automatically.\n" +
+                "This operation is safe and reversible.",
+                "Confirm NVIDIA Cache Purge",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            try
+            {
+                StatusText = "Purging NVIDIA cache...";
+
+                var cleanupResult = await _driverCacheService.PurgeNvidiaCachesAsync(
+                    new Progress<string>(s => StatusText = s),
+                    CancellationToken.None);
+
+                if (cleanupResult.Success)
+                {
+                    MessageBox.Show(
+                        $"NVIDIA Cache Purged!\n\n" +
+                        $"Items deleted: {cleanupResult.ItemsDeleted}\n" +
+                        $"Space reclaimed: {cleanupResult.FormattedSpaceReclaimed}\n" +
+                        $"Duration: {cleanupResult.Duration}\n\n" +
+                        cleanupResult.Message,
+                        "Purge Complete",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+
+                    // Refresh the system cleanup info
+                    await ExecuteRefreshSystemCleanupInfoAsync();
+                }
+                else
+                {
+                    MessageBox.Show(
+                        $"NVIDIA cache purge completed with errors:\n\n{cleanupResult.Message}",
+                        "Purge Errors",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+
+                StatusText = cleanupResult.Message;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Error purging NVIDIA cache:\n{ex.Message}",
+                    "Purge Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+
+                StatusText = "NVIDIA cache purge failed";
+            }
+        }
+
+        private async Task ExecuteEmptyRecycleBinAsync()
+        {
+            var result = MessageBox.Show(
+                "Empty Recycle Bin?\n\n" +
+                "This will permanently delete all files in the Recycle Bin.\n" +
+                "This operation cannot be undone.",
+                "Confirm Empty Recycle Bin",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            try
+            {
+                StatusText = "Emptying Recycle Bin...";
+
+                var cleanupResult = await _systemCleanupService.EmptyRecycleBinAsync(
+                    new Progress<string>(s => StatusText = s),
+                    CancellationToken.None);
+
+                if (cleanupResult.Success)
+                {
+                    MessageBox.Show(
+                        $"Recycle Bin Emptied!\n\n" +
+                        $"Space reclaimed: {cleanupResult.FormattedSpaceReclaimed}\n" +
+                        $"Duration: {cleanupResult.Duration}\n\n" +
+                        cleanupResult.Message,
+                        "Empty Complete",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+
+                    await ExecuteRefreshSystemCleanupInfoAsync();
+                }
+                else
+                {
+                    MessageBox.Show(
+                        $"Error emptying Recycle Bin:\n\n{cleanupResult.Message}",
+                        "Empty Error",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                }
+
+                StatusText = cleanupResult.Message;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Error emptying Recycle Bin:\n{ex.Message}",
+                    "Empty Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+
+                StatusText = "Recycle Bin empty failed";
+            }
+        }
+
+        private async Task ExecuteCleanQuarantineAsync()
+        {
+            var result = MessageBox.Show(
+                "Clean Quarantine?\n\n" +
+                "This will permanently delete all files in the quarantine folder.\n" +
+                "After cleaning, you will no longer be able to restore these items.\n\n" +
+                "This operation cannot be undone.",
+                "Confirm Clean Quarantine",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            try
+            {
+                StatusText = "Cleaning quarantine...";
+
+                var cleanupResult = await _systemCleanupService.CleanQuarantineAsync(
+                    new Progress<string>(s => StatusText = s),
+                    CancellationToken.None);
+
+                if (cleanupResult.Success)
+                {
+                    MessageBox.Show(
+                        $"Quarantine Cleaned!\n\n" +
+                        $"Items deleted: {cleanupResult.ItemsDeleted}\n" +
+                        $"Space reclaimed: {cleanupResult.FormattedSpaceReclaimed}\n" +
+                        $"Duration: {cleanupResult.Duration}\n\n" +
+                        cleanupResult.Message,
+                        "Clean Complete",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+
+                    await ExecuteRefreshSystemCleanupInfoAsync();
+                }
+                else
+                {
+                    MessageBox.Show(
+                        $"Error cleaning quarantine:\n\n{cleanupResult.Message}",
+                        "Clean Error",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                }
+
+                StatusText = cleanupResult.Message;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Error cleaning quarantine:\n{ex.Message}",
+                    "Clean Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+
+                StatusText = "Quarantine clean failed";
             }
         }
 

@@ -388,6 +388,154 @@
                     <!-- Sessions List -->
                     <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
                         <StackPanel>
+                            <!-- System Cleanup Section Header -->
+                            <TextBlock Text="System Cleanup" 
+                                       FontSize="14" 
+                                       FontWeight="Bold" 
+                                       Margin="0,0,0,10"/>
+
+                            <!-- System Cleanup Cards Grid -->
+                            <Grid Margin="0,0,0,20">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="10"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="10"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Recycle Bin Card -->
+                                <Border Grid.Column="0"
+                                        BorderBrush="#CCCCCC" 
+                                        BorderThickness="1" 
+                                        CornerRadius="5" 
+                                        Padding="15" 
+                                        Background="White">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Grid.Row="0" 
+                                                   Text="🗑️ Recycle Bin" 
+                                                   FontSize="14" 
+                                                   FontWeight="Bold" 
+                                                   Margin="0,0,0,10"/>
+
+                                        <TextBlock Grid.Row="1" 
+                                                   Text="{Binding SystemCleanupInfo.FormattedRecycleBinSize, FallbackValue='Loading...'}" 
+                                                   FontSize="18" 
+                                                   Foreground="#2E7D32"
+                                                   FontWeight="Bold"
+                                                   Margin="0,0,0,5"/>
+
+                                        <TextBlock Grid.Row="2" 
+                                                   Text="{Binding SystemCleanupInfo.RecycleBinItemCount, StringFormat='{}{0} items', FallbackValue='0 items'}" 
+                                                   Foreground="Gray"
+                                                   Margin="0,0,0,10"/>
+
+                                        <Button Grid.Row="3" 
+                                                Content="Empty Recycle Bin" 
+                                                Command="{Binding EmptyRecycleBinCommand}"
+                                                Style="{StaticResource {x:Type Button}}"
+                                                Padding="10,5"/>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Quarantine Card -->
+                                <Border Grid.Column="2"
+                                        BorderBrush="#CCCCCC" 
+                                        BorderThickness="1" 
+                                        CornerRadius="5" 
+                                        Padding="15" 
+                                        Background="White">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Grid.Row="0" 
+                                                   Text="📦 Quarantine" 
+                                                   FontSize="14" 
+                                                   FontWeight="Bold" 
+                                                   Margin="0,0,0,10"/>
+
+                                        <TextBlock Grid.Row="1" 
+                                                   Text="{Binding SystemCleanupInfo.FormattedQuarantineSize, FallbackValue='Loading...'}" 
+                                                   FontSize="18" 
+                                                   Foreground="#1976D2"
+                                                   FontWeight="Bold"
+                                                   Margin="0,0,0,5"/>
+
+                                        <TextBlock Grid.Row="2" 
+                                                   Text="{Binding SystemCleanupInfo.QuarantineItemCount, StringFormat='{}{0} items', FallbackValue='0 items'}" 
+                                                   Foreground="Gray"
+                                                   Margin="0,0,0,10"/>
+
+                                        <Button Grid.Row="3" 
+                                                Content="Clean Quarantine" 
+                                                Command="{Binding CleanQuarantineCommand}"
+                                                Style="{StaticResource {x:Type Button}}"
+                                                Padding="10,5"/>
+                                    </Grid>
+                                </Border>
+
+                                <!-- NVIDIA Cache Card -->
+                                <Border Grid.Column="4"
+                                        BorderBrush="#CCCCCC" 
+                                        BorderThickness="1" 
+                                        CornerRadius="5" 
+                                        Padding="15" 
+                                        Background="White">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Grid.Row="0" 
+                                                   Text="🎮 NVIDIA Cache" 
+                                                   FontSize="14" 
+                                                   FontWeight="Bold" 
+                                                   Margin="0,0,0,10"/>
+
+                                        <TextBlock Grid.Row="1" 
+                                                   Text="{Binding SystemCleanupInfo.FormattedNvidiaCacheSize, FallbackValue='Loading...'}" 
+                                                   FontSize="18" 
+                                                   Foreground="#76B900"
+                                                   FontWeight="Bold"
+                                                   Margin="0,0,0,5"/>
+
+                                        <TextBlock Grid.Row="2" 
+                                                   Text="Driver cache &amp; downloads" 
+                                                   Foreground="Gray"
+                                                   Margin="0,0,0,10"/>
+
+                                        <Button Grid.Row="3" 
+                                                Content="Purge NVIDIA Cache" 
+                                                Command="{Binding PurgeNvidiaCacheCommand}"
+                                                Style="{StaticResource {x:Type Button}}"
+                                                Padding="10,5"/>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+
+                            <!-- Refresh Button -->
+                            <Button Content="🔄 Refresh System Info" 
+                                    Width="180" 
+                                    Height="35"
+                                    Command="{Binding RefreshSystemCleanupInfoCommand}"
+                                    HorizontalAlignment="Left"
+                                    Margin="0,0,0,20"/>
+
                             <!-- Section Header -->
                             <TextBlock Text="Restorable Cleanup Sessions" 
                                        FontSize="14" 

@@ -199,6 +199,16 @@ namespace DriveTriage.Services
 
                 info.QuarantinePath = _quarantinePath;
 
+                try
+                {
+                    var driverCacheService = new DriverCacheService();
+                    info.NvidiaCacheSize = driverCacheService.GetNvidiaCacheSizeAsync(CancellationToken.None).Result;
+                }
+                catch
+                {
+                    info.NvidiaCacheSize = 0;
+                }
+
                 return info;
             });
         }
@@ -380,9 +390,11 @@ namespace DriveTriage.Services
         public long QuarantineSize { get; set; }
         public int QuarantineItemCount { get; set; }
         public string QuarantinePath { get; set; } = string.Empty;
-        
+        public long NvidiaCacheSize { get; set; }
+
         public string FormattedRecycleBinSize => FormatSize(RecycleBinSize);
         public string FormattedQuarantineSize => FormatSize(QuarantineSize);
+        public string FormattedNvidiaCacheSize => FormatSize(NvidiaCacheSize);
         
         private static string FormatSize(long bytes)
         {
