@@ -536,6 +536,158 @@
                                     HorizontalAlignment="Left"
                                     Margin="0,0,0,20"/>
 
+                            <!-- System Maintenance Section Header -->
+                            <TextBlock Text="System Maintenance" 
+                                       FontSize="14" 
+                                       FontWeight="Bold" 
+                                       Margin="0,0,0,10"/>
+
+                            <!-- System Maintenance Cards Grid -->
+                            <Grid Margin="0,0,0,20">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="10"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="10"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- DISM Component Cleanup Card -->
+                                <Border Grid.Column="0"
+                                        BorderBrush="#CCCCCC" 
+                                        BorderThickness="1" 
+                                        CornerRadius="5" 
+                                        Padding="15" 
+                                        Background="White">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Grid.Row="0" 
+                                                   Text="🛠️ DISM Cleanup" 
+                                                   FontSize="14" 
+                                                   FontWeight="Bold" 
+                                                   Margin="0,0,0,10"/>
+
+                                        <TextBlock Grid.Row="1" 
+                                                   Text="Component Store" 
+                                                   FontSize="16" 
+                                                   Foreground="#F57C00"
+                                                   FontWeight="Bold"
+                                                   Margin="0,0,0,5"/>
+
+                                        <TextBlock Grid.Row="2" 
+                                                   Text="Clean Windows components" 
+                                                   Foreground="Gray"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,0,10"/>
+
+                                        <Button Grid.Row="3" 
+                                                Content="Run DISM Cleanup" 
+                                                Command="{Binding RunDismComponentCleanupCommand}"
+                                                Style="{StaticResource {x:Type Button}}"
+                                                Padding="10,5"/>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Windows Update Cache Card -->
+                                <Border Grid.Column="2"
+                                        BorderBrush="#CCCCCC" 
+                                        BorderThickness="1" 
+                                        CornerRadius="5" 
+                                        Padding="15" 
+                                        Background="White">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Grid.Row="0" 
+                                                   Text="🔄 Windows Update" 
+                                                   FontSize="14" 
+                                                   FontWeight="Bold" 
+                                                   Margin="0,0,0,10"/>
+
+                                        <TextBlock Grid.Row="1" 
+                                                   Text="{Binding SystemMaintenanceInfo.FormattedWindowsUpdateCacheSize, FallbackValue='Loading...'}" 
+                                                   FontSize="16" 
+                                                   Foreground="#0078D4"
+                                                   FontWeight="Bold"
+                                                   Margin="0,0,0,5"/>
+
+                                        <TextBlock Grid.Row="2" 
+                                                   Text="Download cache" 
+                                                   Foreground="Gray"
+                                                   Margin="0,0,0,10"/>
+
+                                        <Button Grid.Row="3" 
+                                                Content="Clear Update Cache" 
+                                                Command="{Binding ClearWindowsUpdateCacheCommand}"
+                                                Style="{StaticResource {x:Type Button}}"
+                                                Padding="10,5"/>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Shadow Storage Info Card -->
+                                <Border Grid.Column="4"
+                                        BorderBrush="#CCCCCC" 
+                                        BorderThickness="1" 
+                                        CornerRadius="5" 
+                                        Padding="15" 
+                                        Background="White">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Grid.Row="0" 
+                                                   Text="💾 Shadow Storage" 
+                                                   FontSize="14" 
+                                                   FontWeight="Bold" 
+                                                   Margin="0,0,0,10"/>
+
+                                        <TextBlock Grid.Row="1" 
+                                                   Text="{Binding SystemMaintenanceInfo.ShadowStorageInfo.FormattedTotalUsed, FallbackValue='Loading...'}" 
+                                                   FontSize="16" 
+                                                   Foreground="#7B1FA2"
+                                                   FontWeight="Bold"
+                                                   Margin="0,0,0,5"/>
+
+                                        <TextBlock Grid.Row="2" 
+                                                   Text="Restore points &amp; backups" 
+                                                   Foreground="Gray"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,0,10"/>
+
+                                        <Button Grid.Row="3" 
+                                                Content="View Details" 
+                                                Command="{Binding ShowShadowStorageDetailsCommand}"
+                                                Style="{StaticResource {x:Type Button}}"
+                                                Padding="10,5"
+                                                IsEnabled="False"
+                                                ToolTip="Read-only information - use Windows System Properties to manage"/>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+
+                            <!-- Refresh Maintenance Button -->
+                            <Button Content="🔄 Refresh Maintenance Info" 
+                                    Width="200" 
+                                    Height="35"
+                                    Command="{Binding RefreshSystemMaintenanceInfoCommand}"
+                                    HorizontalAlignment="Left"
+                                    Margin="0,0,0,20"/>
+
                             <!-- Section Header -->
                             <TextBlock Text="Restorable Cleanup Sessions" 
                                        FontSize="14" 
@@ -774,6 +926,254 @@
                             </ListView>
                         </Grid>
                     </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- Install Drift Monitor Tab -->
+            <TabItem Header="Install Drift Monitor">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Description -->
+                    <Border Grid.Row="0" 
+                            BorderBrush="#E8F5E9" 
+                            BorderThickness="2" 
+                            CornerRadius="5"
+                            Padding="15" 
+                            Margin="0,0,0,10"
+                            Background="#E8F5E9">
+                        <StackPanel>
+                            <TextBlock Text="📊 Install Drift Monitor" 
+                                       FontWeight="Bold" 
+                                       FontSize="16" 
+                                       Foreground="#2E7D32"
+                                       Margin="0,0,0,5"/>
+                            <TextBlock TextWrapping="Wrap" 
+                                       Foreground="#424242">
+                                <Run Text="Track storage growth over time by taking periodic snapshots of key system folders."/>
+                                <LineBreak/>
+                                <Run Text="Monitors: C:\Program Files, C:\Program Files (x86), C:\ProgramData, and AppData\Local."/>
+                                <LineBreak/>
+                                <Run Text="Use this to identify which applications or folders are consuming the most disk space over time."/>
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Control Panel -->
+                    <StackPanel Grid.Row="1" Margin="0,0,0,10">
+                        <!-- Action Buttons -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <Button Content="📸 Take Snapshot" Width="140" Height="35" Margin="0,0,10,0"
+                                    Command="{Binding TakeSnapshotCommand}"
+                                    FontWeight="SemiBold"/>
+                            <Button Content="🔍 Compare Recent" Width="160" Height="35" Margin="0,0,10,0"
+                                    Command="{Binding CompareSnapshotsCommand}"
+                                    FontWeight="SemiBold"/>
+                            <TextBox Width="60" Height="35" Margin="0,0,5,0"
+                                     Text="{Binding DaysBackFilter, UpdateSourceTrigger=PropertyChanged}"
+                                     VerticalContentAlignment="Center"
+                                     HorizontalContentAlignment="Center"/>
+                            <Button Content="📊 Analyze Growth" Width="150" Height="35" Margin="0,0,10,0"
+                                    Command="{Binding AnalyzeWeeklyGrowthCommand}"
+                                    FontWeight="SemiBold"
+                                    ToolTip="Analyze top growers over specified days"/>
+                            <TextBlock Text="{Binding StatusText}" 
+                                       VerticalAlignment="Center" 
+                                       Margin="20,0,0,0"
+                                       FontWeight="SemiBold"/>
+                        </StackPanel>
+
+                        <!-- Filters -->
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Filter by Classification:" 
+                                       VerticalAlignment="Center" 
+                                       Margin="0,0,15,0"
+                                       FontWeight="SemiBold"/>
+                            <CheckBox Content="✅ Safe" 
+                                      IsChecked="{Binding ShowSafe}"
+                                      VerticalAlignment="Center"
+                                      Margin="0,0,15,0"/>
+                            <CheckBox Content="⚠️ Caution" 
+                                      IsChecked="{Binding ShowCaution}"
+                                      VerticalAlignment="Center"
+                                      Margin="0,0,15,0"/>
+                            <CheckBox Content="🚫 Blocked" 
+                                      IsChecked="{Binding ShowBlocked}"
+                                      VerticalAlignment="Center"
+                                      Margin="0,0,15,0"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Info Panel -->
+                    <Border Grid.Row="2" 
+                            BorderBrush="#CCCCCC" 
+                            BorderThickness="1" 
+                            CornerRadius="3"
+                            Padding="10,5"
+                            Margin="0,0,0,10"
+                            Background="#FFF9C4">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="💡 Tip: " FontWeight="Bold" Foreground="#F57F17"/>
+                            <TextBlock Text="Take snapshots weekly to track install drift. Compare snapshots to see which folders grew the most." 
+                                       Foreground="#424242"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Results Section -->
+                    <Grid Grid.Row="3">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Section Header -->
+                        <TextBlock Grid.Row="0" 
+                                   Text="Recent Growth on C:" 
+                                   FontSize="14" 
+                                   FontWeight="Bold" 
+                                   Margin="0,0,0,10"/>
+
+                        <!-- Empty State -->
+                        <StackPanel Grid.Row="1"
+                                    HorizontalAlignment="Center" 
+                                    VerticalAlignment="Center">
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding GrowthAlerts.Count}" Value="0">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <TextBlock Text="📊" FontSize="48" HorizontalAlignment="Center" Margin="0,0,0,20"/>
+                            <TextBlock Text="No growth data available" 
+                                       FontSize="16" 
+                                       Foreground="Gray"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,0,0,5"/>
+                            <TextBlock Text="Take a snapshot, wait some time, then compare to see install drift" 
+                                       FontSize="12" 
+                                       Foreground="Gray"
+                                       HorizontalAlignment="Center"/>
+                        </StackPanel>
+
+                        <!-- Growth Alerts DataGrid -->
+                        <DataGrid Grid.Row="1" 
+                                  ItemsSource="{Binding GrowthAlerts}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  SelectionMode="Single"
+                                  CanUserSortColumns="True"
+                                  CanUserResizeColumns="True"
+                                  GridLinesVisibility="Horizontal"
+                                  AlternatingRowBackground="#F5F5F5">
+                            <DataGrid.Style>
+                                <Style TargetType="DataGrid">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding GrowthAlerts.Count}" Value="0">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </DataGrid.Style>
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Classification" 
+                                                    Binding="{Binding ClassificationText}" 
+                                                    Width="100">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Center"/>
+                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Folder Path" 
+                                                    Binding="{Binding Path}" 
+                                                    Width="2*">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                            <Setter Property="ToolTip" Value="{Binding Path}"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Previous Size" 
+                                                    Binding="{Binding FormattedPreviousSize}" 
+                                                    Width="100">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Right"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Current Size" 
+                                                    Binding="{Binding FormattedCurrentSize}" 
+                                                    Width="100">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Right"/>
+                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Growth" 
+                                                    Binding="{Binding FormattedDelta}" 
+                                                    Width="100">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Right"/>
+                                            <Setter Property="Foreground" Value="#D32F2F"/>
+                                            <Setter Property="FontWeight" Value="Bold"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="%" 
+                                                    Binding="{Binding GrowthPercentage}" 
+                                                    Width="70">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Center"/>
+                                            <Setter Property="Foreground" Value="#D32F2F"/>
+                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Growth Rate" 
+                                                    Binding="{Binding FormattedGrowthRate}" 
+                                                    Width="100">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Right"/>
+                                            <Setter Property="Foreground" Value="#1976D2"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Timestamp" 
+                                                    Binding="{Binding FormattedTimestamp}" 
+                                                    Width="140"/>
+                                <DataGridTemplateColumn Header="Action" Width="120">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <Button Content="Mark Expected" 
+                                                    Width="110"
+                                                    Height="25"
+                                                    Command="{Binding DataContext.IgnoreGrowthAlertCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}"
+                                                    ToolTip="Add this path to ignore list"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
                 </Grid>
             </TabItem>
         </TabControl>

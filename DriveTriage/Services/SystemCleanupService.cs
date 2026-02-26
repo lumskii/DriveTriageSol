@@ -339,6 +339,436 @@ namespace DriveTriage.Services
             SHEmptyRecycleBin(IntPtr.Zero, null, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND);
         }
 
+        public async Task<CleanupResult> RunDismComponentCleanupAsync(
+            IProgress<string> statusUpdate,
+            CancellationToken cancellationToken)
+        {
+            var result = new CleanupResult
+            {
+                StartTime = DateTime.Now,
+                OperationType = "DISM Component Cleanup"
+            };
+
+            await Task.Run(() =>
+            {
+                try
+                {
+                    statusUpdate.Report("Starting DISM component cleanup...");
+                    statusUpdate.Report("This may take several minutes. Please wait...");
+
+                    var processInfo = new ProcessStartInfo
+                    {
+                        FileName = "Dism.exe",
+                        Arguments = "/Online /Cleanup-Image /StartComponentCleanup",
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true,
+                        Verb = "runas" // Request admin privileges
+                    };
+
+                    using var process = new Process { StartInfo = processInfo };
+
+                    var output = new System.Text.StringBuilder();
+                    var errorOutput = new System.Text.StringBuilder();
+
+                    process.OutputDataReceived += (sender, e) =>
+                    {
+                        if (!string.IsNullOrEmpty(e.Data))
+                        {
+                            output.AppendLine(e.Data);
+                            statusUpdate.Report(e.Data);
+                        }
+                    };
+
+                    process.ErrorDataReceived += (sender, e) =>
+                    {
+                        if (!string.IsNullOrEmpty(e.Data))
+                        {
+                            errorOutput.AppendLine(e.Data);
+                        }
+                    };
+
+                    process.Start();
+                    process.BeginOutputReadLine();
+                    process.BeginErrorReadLine();
+
+                    // Wait for completion or cancellation
+                    while (!process.HasExited)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        Thread.Sleep(500);
+                    }
+
+                    process.WaitForExit();
+
+                    if (process.ExitCode == 0)
+                    {
+                        result.Success = true;
+                        result.Message = "DISM component cleanup completed successfully";
+                        statusUpdate.Report(result.Message);
+                    }
+                    else
+                    {
+                        result.Success = false;
+                        result.Message = $"DISM component cleanup failed with exit code: {process.ExitCode}";
+                        result.ErrorDetails = errorOutput.ToString();
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    result.Success = false;
+                    result.Message = "DISM component cleanup cancelled";
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    result.Success = false;
+                    result.Message = $"Error running DISM component cleanup: {ex.Message}";
+                    result.ErrorDetails = ex.ToString();
+                }
+                finally
+                {
+                    result.EndTime = DateTime.Now;
+                }
+            }, cancellationToken);
+
+            return result;
+        }
+
+        public async Task<CleanupResult> ClearWindowsUpdateDownloadCacheAsync(
+            IProgress<string> statusUpdate,
+            CancellationToken cancellationToken)
+        {
+            var result = new CleanupResult
+            {
+                StartTime = DateTime.Now,
+                OperationType = "Clear Windows Update Cache"
+            };
+
+            await Task.Run(() =>
+            {
+                try
+                {
+                    var downloadPath = @"C:\Windows\SoftwareDistribution\Download";
+
+                    if (!Directory.Exists(downloadPath))
+                    {
+                        result.Success = true;
+                        result.Message = "Windows Update download cache does not exist or is already empty";
+                        statusUpdate.Report(result.Message);
+                        return;
+                    }
+
+                    // Calculate size before
+                    statusUpdate.Report("Calculating Windows Update cache size...");
+                    result.SizeBefore = CalculateDirectorySize(downloadPath, statusUpdate, cancellationToken);
+
+                    if (result.SizeBefore == 0)
+                    {
+                        result.Success = true;
+                        result.Message = "Windows Update download cache is already empty";
+                        statusUpdate.Report(result.Message);
+                        return;
+                    }
+
+                    statusUpdate.Report($"Found {FormatSize(result.SizeBefore)} in Windows Update cache");
+
+                    // Stop Windows Update service
+                    statusUpdate.Report("Stopping Windows Update service (wuauserv)...");
+                    if (!StopService("wuauserv", statusUpdate))
+                    {
+                        result.Success = false;
+                        result.Message = "Failed to stop Windows Update service. Try running as Administrator.";
+                        return;
+                    }
+
+                    Thread.Sleep(2000); // Give service time to stop
+
+                    // Delete cache contents
+                    statusUpdate.Report("Deleting Windows Update download cache...");
+                    var itemsDeleted = 0;
+
+                    try
+                    {
+                        foreach (var file in Directory.GetFiles(downloadPath, "*", SearchOption.AllDirectories))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+
+                            try
+                            {
+                                File.Delete(file);
+                                itemsDeleted++;
+
+                                if (itemsDeleted % 50 == 0)
+                                {
+                                    statusUpdate.Report($"Deleted {itemsDeleted} files...");
+                                }
+                            }
+                            catch
+                            {
+                                // Skip files we can't delete
+                            }
+                        }
+
+                        // Delete subdirectories
+                        foreach (var dir in Directory.GetDirectories(downloadPath, "*", SearchOption.TopDirectoryOnly))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+
+                            try
+                            {
+                                Directory.Delete(dir, recursive: true);
+                            }
+                            catch
+                            {
+                                // Skip directories we can't delete
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        // Always restart the service
+                        statusUpdate.Report("Restarting Windows Update service (wuauserv)...");
+                        StartService("wuauserv", statusUpdate);
+                    }
+
+                    result.SizeAfter = CalculateDirectorySize(downloadPath, statusUpdate, cancellationToken);
+                    result.SpaceReclaimed = result.SizeBefore - result.SizeAfter;
+                    result.ItemsDeleted = itemsDeleted;
+                    result.Success = true;
+                    result.Message = $"Windows Update cache cleared. Deleted {itemsDeleted} items, reclaimed {FormatSize(result.SpaceReclaimed)}";
+
+                    statusUpdate.Report(result.Message);
+                }
+                catch (OperationCanceledException)
+                {
+                    result.Success = false;
+                    result.Message = "Windows Update cache cleanup cancelled";
+
+                    // Ensure service is restarted
+                    try
+                    {
+                        StartService("wuauserv", statusUpdate);
+                    }
+                    catch { }
+
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    result.Success = false;
+                    result.Message = $"Error clearing Windows Update cache: {ex.Message}";
+                    result.ErrorDetails = ex.ToString();
+
+                    // Ensure service is restarted
+                    try
+                    {
+                        StartService("wuauserv", statusUpdate);
+                    }
+                    catch { }
+                }
+                finally
+                {
+                    result.EndTime = DateTime.Now;
+                }
+            }, cancellationToken);
+
+            return result;
+        }
+
+        public async Task<ShadowStorageInfo> GetShadowStorageInfoAsync()
+        {
+            return await Task.Run(() =>
+            {
+                var info = new ShadowStorageInfo();
+
+                try
+                {
+                    var processInfo = new ProcessStartInfo
+                    {
+                        FileName = "vssadmin.exe",
+                        Arguments = "list shadowstorage",
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    };
+
+                    using var process = Process.Start(processInfo);
+                    if (process == null)
+                    {
+                        info.ErrorMessage = "Failed to start vssadmin process";
+                        return info;
+                    }
+
+                    var output = process.StandardOutput.ReadToEnd();
+                    var error = process.StandardError.ReadToEnd();
+                    process.WaitForExit();
+
+                    if (process.ExitCode != 0)
+                    {
+                        info.ErrorMessage = $"vssadmin exited with code {process.ExitCode}: {error}";
+                        return info;
+                    }
+
+                    // Parse vssadmin output
+                    ParseShadowStorageOutput(output, info);
+                }
+                catch (Exception ex)
+                {
+                    info.ErrorMessage = $"Error reading shadow storage info: {ex.Message}";
+                }
+
+                return info;
+            });
+        }
+
+        private void ParseShadowStorageOutput(string output, ShadowStorageInfo info)
+        {
+            var lines = output.Split('\n');
+            var currentStorage = new ShadowStorageItem();
+
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+
+                if (trimmed.StartsWith("For volume:"))
+                {
+                    currentStorage = new ShadowStorageItem();
+                    currentStorage.ForVolume = ExtractValue(trimmed);
+                }
+                else if (trimmed.StartsWith("Shadow Copy Storage volume:"))
+                {
+                    currentStorage.StorageVolume = ExtractValue(trimmed);
+                }
+                else if (trimmed.StartsWith("Used Shadow Copy Storage space:"))
+                {
+                    currentStorage.UsedSpace = ExtractValue(trimmed);
+                    currentStorage.UsedSpaceBytes = ParseSizeToBytes(currentStorage.UsedSpace);
+                }
+                else if (trimmed.StartsWith("Allocated Shadow Copy Storage space:"))
+                {
+                    currentStorage.AllocatedSpace = ExtractValue(trimmed);
+                    currentStorage.AllocatedSpaceBytes = ParseSizeToBytes(currentStorage.AllocatedSpace);
+                }
+                else if (trimmed.StartsWith("Maximum Shadow Copy Storage space:"))
+                {
+                    currentStorage.MaximumSpace = ExtractValue(trimmed);
+
+                    if (!string.IsNullOrEmpty(currentStorage.ForVolume))
+                    {
+                        info.StorageItems.Add(currentStorage);
+                        info.TotalUsedBytes += currentStorage.UsedSpaceBytes;
+                        info.TotalAllocatedBytes += currentStorage.AllocatedSpaceBytes;
+                    }
+                }
+            }
+
+            info.HasData = info.StorageItems.Count > 0;
+        }
+
+        private string ExtractValue(string line)
+        {
+            var colonIndex = line.IndexOf(':');
+            if (colonIndex >= 0 && colonIndex < line.Length - 1)
+            {
+                return line.Substring(colonIndex + 1).Trim();
+            }
+            return string.Empty;
+        }
+
+        private long ParseSizeToBytes(string sizeString)
+        {
+            try
+            {
+                sizeString = sizeString.Replace(",", "").Trim();
+
+                if (sizeString.Contains("UNBOUNDED", StringComparison.OrdinalIgnoreCase))
+                    return -1;
+
+                var parts = sizeString.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 2)
+                    return 0;
+
+                if (!double.TryParse(parts[0], out double value))
+                    return 0;
+
+                var unit = parts[1].ToUpperInvariant();
+                return unit switch
+                {
+                    "BYTES" or "B" => (long)value,
+                    "KB" => (long)(value * 1024),
+                    "MB" => (long)(value * 1024 * 1024),
+                    "GB" => (long)(value * 1024 * 1024 * 1024),
+                    "TB" => (long)(value * 1024L * 1024 * 1024 * 1024),
+                    _ => 0
+                };
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private bool StopService(string serviceName, IProgress<string> statusUpdate)
+        {
+            try
+            {
+                var processInfo = new ProcessStartInfo
+                {
+                    FileName = "net.exe",
+                    Arguments = $"stop {serviceName}",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    Verb = "runas"
+                };
+
+                using var process = Process.Start(processInfo);
+                if (process == null)
+                    return false;
+
+                process.WaitForExit(10000); // 10 second timeout
+                return process.ExitCode == 0 || process.ExitCode == 2; // 2 = already stopped
+            }
+            catch (Exception ex)
+            {
+                statusUpdate.Report($"Error stopping service: {ex.Message}");
+                return false;
+            }
+        }
+
+        private bool StartService(string serviceName, IProgress<string> statusUpdate)
+        {
+            try
+            {
+                var processInfo = new ProcessStartInfo
+                {
+                    FileName = "net.exe",
+                    Arguments = $"start {serviceName}",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    Verb = "runas"
+                };
+
+                using var process = Process.Start(processInfo);
+                if (process == null)
+                    return false;
+
+                process.WaitForExit(10000);
+                return process.ExitCode == 0 || process.ExitCode == 2; // 2 = already started
+            }
+            catch (Exception ex)
+            {
+                statusUpdate.Report($"Error starting service: {ex.Message}");
+                return false;
+            }
+        }
+
         private static string FormatSize(long bytes)
         {
             string[] sizes = { "B", "KB", "MB", "GB", "TB" };
@@ -408,5 +838,44 @@ namespace DriveTriage.Services
             }
             return $"{len:0.##} {sizes[order]}";
         }
+    }
+
+    public class ShadowStorageInfo
+    {
+        public List<ShadowStorageItem> StorageItems { get; set; } = new();
+        public long TotalUsedBytes { get; set; }
+        public long TotalAllocatedBytes { get; set; }
+        public bool HasData { get; set; }
+        public string? ErrorMessage { get; set; }
+
+        public string FormattedTotalUsed => FormatSize(TotalUsedBytes);
+        public string FormattedTotalAllocated => FormatSize(TotalAllocatedBytes);
+
+        private static string FormatSize(long bytes)
+        {
+            if (bytes < 0)
+                return "UNBOUNDED";
+
+            string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+            double len = bytes;
+            int order = 0;
+            while (len >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                len /= 1024;
+            }
+            return $"{len:0.##} {sizes[order]}";
+        }
+    }
+
+    public class ShadowStorageItem
+    {
+        public string ForVolume { get; set; } = string.Empty;
+        public string StorageVolume { get; set; } = string.Empty;
+        public string UsedSpace { get; set; } = string.Empty;
+        public long UsedSpaceBytes { get; set; }
+        public string AllocatedSpace { get; set; } = string.Empty;
+        public long AllocatedSpaceBytes { get; set; }
+        public string MaximumSpace { get; set; } = string.Empty;
     }
 }

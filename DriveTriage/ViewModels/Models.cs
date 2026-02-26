@@ -226,4 +226,79 @@ namespace DriveTriage.ViewModels
             ? $"Successfully restored {RestoredCount} items"
             : $"Restored {RestoredCount} items, {FailedCount} failed";
     }
+
+    public class SystemMaintenanceInfo
+    {
+        public bool DismAvailable { get; set; }
+        public bool WindowsUpdateCacheAvailable { get; set; }
+        public long WindowsUpdateCacheSize { get; set; }
+        public Services.ShadowStorageInfo? ShadowStorageInfo { get; set; }
+
+        public string FormattedWindowsUpdateCacheSize => FormatSize(WindowsUpdateCacheSize);
+
+        private static string FormatSize(long bytes)
+        {
+            string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+            double len = bytes;
+            int order = 0;
+            while (len >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                len /= 1024;
+            }
+            return $"{len:0.##} {sizes[order]}";
+        }
+    }
+
+    public class GrowthAlert
+    {
+        public required string Path { get; init; }
+        public long PreviousBytes { get; init; }
+        public long CurrentBytes { get; init; }
+        public long DeltaBytes { get; init; }
+        public DateTime Timestamp { get; init; }
+        public SafetyClassification Classification { get; set; } = SafetyClassification.Safe;
+        public List<string> ClassificationReasons { get; set; } = new();
+        public double GrowthRateBytesPerDay { get; set; }
+
+        public string FormattedPreviousSize => FormatSize(PreviousBytes);
+        public string FormattedCurrentSize => FormatSize(CurrentBytes);
+        public string FormattedDelta => FormatSize(DeltaBytes);
+        public string FormattedTimestamp => Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
+        public string FormattedGrowthRate => GrowthRateBytesPerDay > 0 
+            ? $"{FormatSize((long)GrowthRateBytesPerDay)}/day" 
+            : "N/A";
+
+        public string ClassificationText => Classification switch
+        {
+            SafetyClassification.Safe => "✅ Safe",
+            SafetyClassification.Caution => "⚠️ Caution",
+            SafetyClassification.Blocked => "🚫 Blocked",
+            _ => "Unknown"
+        };
+
+        public string GrowthPercentage
+        {
+            get
+            {
+                if (PreviousBytes == 0)
+                    return "New";
+                var percentage = (DeltaBytes / (double)PreviousBytes) * 100;
+                return $"+{percentage:0.#}%";
+            }
+        }
+
+        private static string FormatSize(long bytes)
+        {
+            string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+            double len = bytes;
+            int order = 0;
+            while (len >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                len /= 1024;
+            }
+            return $"{len:0.##} {sizes[order]}";
+        }
+    }
 }

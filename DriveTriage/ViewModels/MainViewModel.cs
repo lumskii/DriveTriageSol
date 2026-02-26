@@ -16,6 +16,7 @@ namespace DriveTriage.ViewModels
         private readonly AppsService _appsService;
         private readonly SystemCleanupService _systemCleanupService;
         private readonly DriverCacheService _driverCacheService;
+        private readonly StorageSnapshotService _storageSnapshotService;
         private CancellationTokenSource? _bucketsCancellationTokenSource;
         private CancellationTokenSource? _appsCancellationTokenSource;
         private double _progressValue;
@@ -27,6 +28,11 @@ namespace DriveTriage.ViewModels
         private bool _isScanning;
         private double _progressPercent;
         private SystemCleanupInfo? _systemCleanupInfo;
+        private SystemMaintenanceInfo? _systemMaintenanceInfo;
+        private bool _showSafe = true;
+        private bool _showCaution = true;
+        private bool _showBlocked = true;
+        private int _daysBackFilter = 7;
 
         public MainViewModel()
         {
@@ -36,6 +42,7 @@ namespace DriveTriage.ViewModels
             _appsService = new AppsService();
             _systemCleanupService = new SystemCleanupService();
             _driverCacheService = new DriverCacheService();
+            _storageSnapshotService = new StorageSnapshotService();
 
             LargestFiles = new ObservableCollection<FileSystemItem>();
             LargestFolders = new ObservableCollection<FileSystemItem>();
@@ -45,6 +52,7 @@ namespace DriveTriage.ViewModels
             FilteredApps = new ObservableCollection<InstalledApp>();
             RestorableSessions = new ObservableCollection<CleanupSession>();
             AvailableDrives = new ObservableCollection<DriveInfo>();
+            GrowthAlerts = new ObservableCollection<GrowthAlert>();
 
             // Initialize commands BEFORE loading drives
             // This prevents NullReferenceException when SelectedDrive setter calls RaiseCanExecuteChanged
@@ -63,6 +71,13 @@ namespace DriveTriage.ViewModels
             PurgeNvidiaCacheCommand = new AsyncRelayCommand(ExecutePurgeNvidiaCacheAsync);
             EmptyRecycleBinCommand = new AsyncRelayCommand(ExecuteEmptyRecycleBinAsync);
             CleanQuarantineCommand = new AsyncRelayCommand(ExecuteCleanQuarantineAsync);
+            RunDismComponentCleanupCommand = new AsyncRelayCommand(ExecuteRunDismComponentCleanupAsync);
+            ClearWindowsUpdateCacheCommand = new AsyncRelayCommand(ExecuteClearWindowsUpdateCacheAsync);
+            RefreshSystemMaintenanceInfoCommand = new AsyncRelayCommand(ExecuteRefreshSystemMaintenanceInfoAsync);
+            TakeSnapshotCommand = new AsyncRelayCommand(ExecuteTakeSnapshotAsync, CanExecuteTakeSnapshot);
+            CompareSnapshotsCommand = new AsyncRelayCommand(ExecuteCompareSnapshotsAsync, CanExecuteCompareSnapshots);
+            AnalyzeWeeklyGrowthCommand = new AsyncRelayCommand(ExecuteAnalyzeWeeklyGrowthAsync, CanExecuteAnalyzeWeeklyGrowth);
+            IgnoreGrowthAlertCommand = new AsyncRelayCommand<GrowthAlert>(ExecuteIgnoreGrowthAlertAsync, CanExecuteIgnoreGrowthAlert);
 
             // Load drives AFTER commands are initialized
             // This is safe because SelectedDrive setter now has ScanCommand initialized
@@ -70,6 +85,9 @@ namespace DriveTriage.ViewModels
 
             // Load system cleanup info
             _ = ExecuteRefreshSystemCleanupInfoAsync();
+
+            // Load system maintenance info
+            _ = ExecuteRefreshSystemMaintenanceInfoAsync();
         }
 
         public ObservableCollection<FileSystemItem> LargestFiles { get; }
@@ -80,6 +98,9 @@ namespace DriveTriage.ViewModels
         public ObservableCollection<InstalledApp> FilteredApps { get; }
         public ObservableCollection<CleanupSession> RestorableSessions { get; }
         public ObservableCollection<DriveInfo> AvailableDrives { get; }
+
+        private ObservableCollection<GrowthAlert> _allGrowthAlerts = new();
+        public ObservableCollection<GrowthAlert> GrowthAlerts { get; }
 
         public DriveInfo? SelectedDrive
         {
@@ -153,6 +174,59 @@ namespace DriveTriage.ViewModels
             }
         }
 
+        public SystemMaintenanceInfo? SystemMaintenanceInfo
+        {
+            get => _systemMaintenanceInfo;
+            set
+            {
+                _systemMaintenanceInfo = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public bool ShowSafe
+        {
+            get => _showSafe;
+            set
+            {
+                _showSafe = value;
+                OnPropertyChanged();
+                FilterGrowthAlerts();
+            }
+        }
+
+        public bool ShowCaution
+        {
+            get => _showCaution;
+            set
+            {
+                _showCaution = value;
+                OnPropertyChanged();
+                FilterGrowthAlerts();
+            }
+        }
+
+        public bool ShowBlocked
+        {
+            get => _showBlocked;
+            set
+            {
+                _showBlocked = value;
+                OnPropertyChanged();
+                FilterGrowthAlerts();
+            }
+        }
+
+        public int DaysBackFilter
+        {
+            get => _daysBackFilter;
+            set
+            {
+                _daysBackFilter = value;
+                OnPropertyChanged();
+            }
+        }
+
         public AsyncRelayCommand ScanCommand { get; }
         public AsyncRelayCommand CancelCommand { get; }
         public AsyncRelayCommand ScanBucketsCommand { get; }
@@ -168,6 +242,13 @@ namespace DriveTriage.ViewModels
         public AsyncRelayCommand PurgeNvidiaCacheCommand { get; }
         public AsyncRelayCommand EmptyRecycleBinCommand { get; }
         public AsyncRelayCommand CleanQuarantineCommand { get; }
+        public AsyncRelayCommand RunDismComponentCleanupCommand { get; }
+        public AsyncRelayCommand ClearWindowsUpdateCacheCommand { get; }
+        public AsyncRelayCommand RefreshSystemMaintenanceInfoCommand { get; }
+        public AsyncRelayCommand TakeSnapshotCommand { get; }
+        public AsyncRelayCommand CompareSnapshotsCommand { get; }
+        public AsyncRelayCommand AnalyzeWeeklyGrowthCommand { get; }
+        public AsyncRelayCommand<GrowthAlert> IgnoreGrowthAlertCommand { get; }
 
         private bool CanExecuteScan()
         {
@@ -993,6 +1074,493 @@ namespace DriveTriage.ViewModels
 
                 StatusText = "Quarantine clean failed";
             }
+        }
+
+        private async Task ExecuteRunDismComponentCleanupAsync()
+        {
+            var result = MessageBox.Show(
+                "Run DISM Component Cleanup?\n\n" +
+                "This will clean up Windows component store and can free significant disk space.\n\n" +
+                "⚠️ Important:\n" +
+                "• This operation may take 10-30 minutes\n" +
+                "• Requires Administrator privileges\n" +
+                "• Safe to run, but cannot be cancelled once started\n" +
+                "• Your computer will remain usable during cleanup\n\n" +
+                "Continue?",
+                "Confirm DISM Component Cleanup",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            try
+            {
+                StatusText = "Running DISM component cleanup...";
+
+                var cleanupResult = await _systemCleanupService.RunDismComponentCleanupAsync(
+                    new Progress<string>(s => StatusText = s),
+                    CancellationToken.None);
+
+                if (cleanupResult.Success)
+                {
+                    MessageBox.Show(
+                        $"DISM Component Cleanup Complete!\n\n" +
+                        $"Duration: {cleanupResult.Duration}\n\n" +
+                        cleanupResult.Message,
+                        "Cleanup Complete",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
+                else
+                {
+                    MessageBox.Show(
+                        $"DISM component cleanup completed with errors:\n\n{cleanupResult.Message}\n\n" +
+                        "Note: You may need to run this application as Administrator.",
+                        "Cleanup Errors",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+
+                StatusText = cleanupResult.Message;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Error running DISM component cleanup:\n{ex.Message}\n\n" +
+                    "Note: This operation requires Administrator privileges.",
+                    "Cleanup Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+
+                StatusText = "DISM component cleanup failed";
+            }
+        }
+
+        private async Task ExecuteClearWindowsUpdateCacheAsync()
+        {
+            var result = MessageBox.Show(
+                "Clear Windows Update Download Cache?\n\n" +
+                "This will:\n" +
+                "1. Stop the Windows Update service (wuauserv)\n" +
+                "2. Delete all files in C:\\Windows\\SoftwareDistribution\\Download\n" +
+                "3. Restart the Windows Update service\n\n" +
+                "⚠️ Important:\n" +
+                "• Requires Administrator privileges\n" +
+                "• In-progress Windows Updates will be interrupted\n" +
+                "• Updates will re-download when needed\n" +
+                "• Safe operation - Windows Update will work normally after\n\n" +
+                "Continue?",
+                "Confirm Clear Windows Update Cache",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            try
+            {
+                StatusText = "Clearing Windows Update cache...";
+
+                var cleanupResult = await _systemCleanupService.ClearWindowsUpdateDownloadCacheAsync(
+                    new Progress<string>(s => StatusText = s),
+                    CancellationToken.None);
+
+                if (cleanupResult.Success)
+                {
+                    MessageBox.Show(
+                        $"Windows Update Cache Cleared!\n\n" +
+                        $"Items deleted: {cleanupResult.ItemsDeleted}\n" +
+                        $"Space reclaimed: {cleanupResult.FormattedSpaceReclaimed}\n" +
+                        $"Duration: {cleanupResult.Duration}\n\n" +
+                        cleanupResult.Message,
+                        "Cache Cleared",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+
+                    // Refresh maintenance info
+                    await ExecuteRefreshSystemMaintenanceInfoAsync();
+                }
+                else
+                {
+                    MessageBox.Show(
+                        $"Windows Update cache clear completed with errors:\n\n{cleanupResult.Message}\n\n" +
+                        "Note: You may need to run this application as Administrator.",
+                        "Clear Errors",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+
+                StatusText = cleanupResult.Message;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Error clearing Windows Update cache:\n{ex.Message}\n\n" +
+                    "Note: This operation requires Administrator privileges.",
+                    "Clear Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+
+                StatusText = "Windows Update cache clear failed";
+            }
+        }
+
+        private async Task ExecuteRefreshSystemMaintenanceInfoAsync()
+        {
+            try
+            {
+                StatusText = "Refreshing system maintenance info...";
+
+                var info = new SystemMaintenanceInfo
+                {
+                    DismAvailable = true,
+                    WindowsUpdateCacheAvailable = Directory.Exists(@"C:\Windows\SoftwareDistribution\Download")
+                };
+
+                // Calculate Windows Update cache size
+                if (info.WindowsUpdateCacheAvailable)
+                {
+                    try
+                    {
+                        var downloadPath = @"C:\Windows\SoftwareDistribution\Download";
+                        info.WindowsUpdateCacheSize = await Task.Run(() => 
+                            CalculateDirectorySizeHelper(downloadPath));
+                    }
+                    catch
+                    {
+                        info.WindowsUpdateCacheSize = 0;
+                    }
+                }
+
+                // Get shadow storage info
+                try
+                {
+                    info.ShadowStorageInfo = await _systemCleanupService.GetShadowStorageInfoAsync();
+                }
+                catch
+                {
+                    info.ShadowStorageInfo = new ShadowStorageInfo 
+                    { 
+                        ErrorMessage = "Unable to retrieve shadow storage information" 
+                    };
+                }
+
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    SystemMaintenanceInfo = info;
+                });
+
+                StatusText = "System maintenance info updated";
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"Error refreshing maintenance info: {ex.Message}";
+            }
+        }
+
+        private async Task ExecuteTakeSnapshotAsync()
+        {
+            try
+            {
+                StatusText = "Taking storage snapshot...";
+                IsScanning = true;
+                ProgressPercent = 0;
+
+                var snapshot = await _storageSnapshotService.TakeSnapshotAsync(
+                    new Progress<string>(s => StatusText = s),
+                    CancellationToken.None);
+
+                var snapshotCount = await _storageSnapshotService.GetSnapshotCountAsync();
+
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    MessageBox.Show(
+                        $"Storage snapshot completed!\n\n" +
+                        $"Tracked folders: {snapshot.FolderSnapshots.Sum(f => f.SubfolderSizes.Count)}\n" +
+                        $"Total snapshots: {snapshotCount}\n\n" +
+                        $"You can now compare snapshots to detect install drift.",
+                        "Snapshot Complete",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                });
+
+                StatusText = $"Snapshot saved - {snapshotCount} total snapshots";
+
+                // Enable compare button if we have enough snapshots
+                CompareSnapshotsCommand.RaiseCanExecuteChanged();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Error taking snapshot:\n{ex.Message}",
+                    "Snapshot Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+
+                StatusText = "Snapshot failed";
+            }
+            finally
+            {
+                IsScanning = false;
+                ProgressPercent = 0;
+                TakeSnapshotCommand.RaiseCanExecuteChanged();
+            }
+        }
+
+        private bool CanExecuteTakeSnapshot()
+        {
+            return !IsScanning;
+        }
+
+        private async Task ExecuteCompareSnapshotsAsync()
+        {
+            try
+            {
+                StatusText = "Comparing snapshots...";
+                IsScanning = true;
+
+                var alerts = await _storageSnapshotService.CompareLatestSnapshotsAsync(
+                    new Progress<string>(s => StatusText = s),
+                    CancellationToken.None);
+
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    _allGrowthAlerts.Clear();
+                    foreach (var alert in alerts)
+                    {
+                        _allGrowthAlerts.Add(alert);
+                    }
+                    FilterGrowthAlerts();
+                });
+
+                if (alerts.Count == 0)
+                {
+                    var snapshotCount = await _storageSnapshotService.GetSnapshotCountAsync();
+
+                    if (snapshotCount < 2)
+                    {
+                        MessageBox.Show(
+                            $"Need at least 2 snapshots to compare growth.\n\n" +
+                            $"Current snapshots: {snapshotCount}\n\n" +
+                            "Please take another snapshot and try again.",
+                            "Insufficient Snapshots",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Information);
+                    }
+                    else
+                    {
+                        MessageBox.Show(
+                            "No significant growth detected!\n\n" +
+                            "No folders have grown by more than 1 MB since the last snapshot.",
+                            "No Growth Detected",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Information);
+                    }
+                }
+                else
+                {
+                    var latestDate = await _storageSnapshotService.GetLatestSnapshotDateAsync();
+                    var totalGrowth = alerts.Sum(a => a.DeltaBytes);
+
+                    MessageBox.Show(
+                        $"Found {alerts.Count} folders with significant growth!\n\n" +
+                        $"Total growth detected: {FormatSize(totalGrowth)}\n" +
+                        $"Latest snapshot: {latestDate:g}\n\n" +
+                        "Results are displayed in the 'Install Drift Monitor' section below.",
+                        "Growth Detected",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
+
+                StatusText = alerts.Count > 0 
+                    ? $"Found {alerts.Count} folders with growth" 
+                    : "No significant growth detected";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Error comparing snapshots:\n{ex.Message}",
+                    "Comparison Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+
+                StatusText = "Comparison failed";
+            }
+            finally
+            {
+                IsScanning = false;
+                CompareSnapshotsCommand.RaiseCanExecuteChanged();
+            }
+        }
+
+        private bool CanExecuteCompareSnapshots()
+        {
+            return !IsScanning;
+        }
+
+        private async Task ExecuteAnalyzeWeeklyGrowthAsync()
+        {
+            try
+            {
+                StatusText = $"Analyzing growth over {DaysBackFilter} days...";
+                IsScanning = true;
+
+                var alerts = await _storageSnapshotService.GetTopGrowersAsync(
+                    DaysBackFilter,
+                    50, // Top 50
+                    new Progress<string>(s => StatusText = s),
+                    CancellationToken.None);
+
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    _allGrowthAlerts.Clear();
+                    foreach (var alert in alerts)
+                    {
+                        _allGrowthAlerts.Add(alert);
+                    }
+                    FilterGrowthAlerts();
+                });
+
+                if (alerts.Count == 0)
+                {
+                    MessageBox.Show(
+                        $"No significant growth detected in the last {DaysBackFilter} days.\n\n" +
+                        "Try adjusting the time period or take more snapshots.",
+                        "No Growth Detected",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
+                else
+                {
+                    var totalGrowth = alerts.Sum(a => a.DeltaBytes);
+
+                    MessageBox.Show(
+                        $"Found {alerts.Count} top growers over {DaysBackFilter} days!\n\n" +
+                        $"Total growth: {FormatSize(totalGrowth)}\n\n" +
+                        "Results are displayed in the 'Install Drift Monitor' section.",
+                        "Growth Analysis Complete",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
+
+                StatusText = alerts.Count > 0
+                    ? $"Found {alerts.Count} top growers over {DaysBackFilter} days"
+                    : "No significant growth detected";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Error analyzing weekly growth:\n{ex.Message}",
+                    "Analysis Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+
+                StatusText = "Analysis failed";
+            }
+            finally
+            {
+                IsScanning = false;
+                AnalyzeWeeklyGrowthCommand.RaiseCanExecuteChanged();
+            }
+        }
+
+        private bool CanExecuteAnalyzeWeeklyGrowth()
+        {
+            return !IsScanning;
+        }
+
+        private async Task ExecuteIgnoreGrowthAlertAsync(GrowthAlert? alert)
+        {
+            if (alert == null)
+                return;
+
+            var result = MessageBox.Show(
+                $"Mark this path as expected growth?\n\n" +
+                $"Path: {alert.Path}\n\n" +
+                "This will add it to the ignore list and it won't appear in future comparisons.",
+                "Mark as Expected",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            try
+            {
+                await _storageSnapshotService.AddToIgnoreListAsync(alert.Path);
+
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    _allGrowthAlerts.Remove(alert);
+                    GrowthAlerts.Remove(alert);
+                });
+
+                StatusText = $"Added to ignore list: {Path.GetFileName(alert.Path)}";
+
+                MessageBox.Show(
+                    "Path added to ignore list.\n\n" +
+                    "It will be excluded from future growth comparisons.",
+                    "Added to Ignore List",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Error adding to ignore list:\n{ex.Message}",
+                    "Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+        }
+
+        private bool CanExecuteIgnoreGrowthAlert(GrowthAlert? alert)
+        {
+            return alert != null && !IsScanning;
+        }
+
+        private void FilterGrowthAlerts()
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                GrowthAlerts.Clear();
+
+                var filtered = _allGrowthAlerts.Where(alert =>
+                {
+                    return alert.Classification switch
+                    {
+                        SafetyClassification.Safe => ShowSafe,
+                        SafetyClassification.Caution => ShowCaution,
+                        SafetyClassification.Blocked => ShowBlocked,
+                        _ => true
+                    };
+                });
+
+                foreach (var alert in filtered)
+                {
+                    GrowthAlerts.Add(alert);
+                }
+            });
+        }
+
+        private long CalculateDirectorySizeHelper(string path)
+        {
+            long size = 0;
+            try
+            {
+                foreach (var file in Directory.GetFiles(path, "*", SearchOption.AllDirectories))
+                {
+                    try
+                    {
+                        var fileInfo = new FileInfo(file);
+                        size += fileInfo.Length;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return size;
         }
 
         private static string FormatSize(long bytes)
