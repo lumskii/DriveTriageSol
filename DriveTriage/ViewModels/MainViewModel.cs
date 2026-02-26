@@ -58,6 +58,7 @@ namespace DriveTriage.ViewModels
             AvailableDrives = new ObservableCollection<DriveInfo>();
             GrowthAlerts = new ObservableCollection<GrowthAlert>();
             RecoveryCandidates = new ObservableCollection<RecoveryCandidate>();
+            FindingGroups = new ObservableCollection<FindingGroup>();
 
             // Initialize commands BEFORE loading drives
             // This prevents NullReferenceException when SelectedDrive setter calls RaiseCanExecuteChanged
@@ -85,6 +86,9 @@ namespace DriveTriage.ViewModels
             IgnoreGrowthAlertCommand = new AsyncRelayCommand<GrowthAlert>(ExecuteIgnoreGrowthAlertAsync, CanExecuteIgnoreGrowthAlert);
             GeneratePlanCommand = new AsyncRelayCommand(ExecuteGeneratePlanAsync, CanExecuteGeneratePlan);
             ExecuteSafePlanCommand = new AsyncRelayCommand(ExecuteSafePlanAsync, CanExecuteSafePlan);
+            CleanGroupSafeCommand = new AsyncRelayCommand<FindingGroup>(ExecuteCleanGroupSafeAsync, CanExecuteCleanGroup);
+            CleanGroupAllCommand = new AsyncRelayCommand<FindingGroup>(ExecuteCleanGroupAllAsync, CanExecuteCleanGroup);
+            CleanSubgroupCommand = new AsyncRelayCommand<FindingSubgroup>(ExecuteCleanSubgroupAsync, CanExecuteCleanSubgroup);
 
             // Load drives AFTER commands are initialized
             // This is safe because SelectedDrive setter now has ScanCommand initialized
@@ -109,6 +113,7 @@ namespace DriveTriage.ViewModels
         private ObservableCollection<GrowthAlert> _allGrowthAlerts = new();
         public ObservableCollection<GrowthAlert> GrowthAlerts { get; }
         public ObservableCollection<RecoveryCandidate> RecoveryCandidates { get; }
+        public ObservableCollection<FindingGroup> FindingGroups { get; }
 
         public DriveInfo? SelectedDrive
         {
@@ -279,6 +284,9 @@ namespace DriveTriage.ViewModels
         public AsyncRelayCommand<GrowthAlert> IgnoreGrowthAlertCommand { get; }
         public AsyncRelayCommand GeneratePlanCommand { get; }
         public AsyncRelayCommand ExecuteSafePlanCommand { get; }
+        public AsyncRelayCommand<FindingGroup> CleanGroupSafeCommand { get; }
+        public AsyncRelayCommand<FindingGroup> CleanGroupAllCommand { get; }
+        public AsyncRelayCommand<FindingSubgroup> CleanSubgroupCommand { get; }
 
         private bool CanExecuteScan()
         {
@@ -433,6 +441,7 @@ namespace DriveTriage.ViewModels
             _isScanningBuckets = true;
             _bucketsCancellationTokenSource = new CancellationTokenSource();
             CleanupBuckets.Clear();
+            FindingGroups.Clear();
 
             ScanBucketsCommand.RaiseCanExecuteChanged();
             CancelBucketsCommand.RaiseCanExecuteChanged();
@@ -447,6 +456,9 @@ namespace DriveTriage.ViewModels
                 {
                     CleanupBuckets.Add(bucket);
                 }
+
+                // Build finding groups
+                await BuildFindingGroupsAsync(buckets);
 
                 var totalSize = buckets.Sum(b => b.ReclaimableBytes);
                 StatusText = $"Found {CleanupBuckets.Count} cleanup opportunities. Total reclaimable: {FormatSize(totalSize)}";
@@ -1801,6 +1813,403 @@ namespace DriveTriage.ViewModels
         {
             return !IsScanning && CurrentPlan != null && 
                    CurrentPlan.SelectedCandidates.Any(c => c.Risk == SafetyClassification.Safe);
+        }
+
+        private async Task BuildFindingGroupsAsync(List<CleanupBucket> buckets)
+        {
+            await Task.Run(() =>
+            {
+                var systemCoreGroup = new FindingGroup
+                {
+                    Name = "🚫 System Core (Protected)",
+                    Classification = SafetyClassification.Blocked
+                };
+
+                var optionalGroup = new FindingGroup
+                {
+                    Name = "✅ Optional / Reclaimable",
+                    Classification = SafetyClassification.Safe
+                };
+
+                // Categorize buckets and their items
+                var vendorCacheSubgroup = new FindingSubgroup { CategoryName = "Vendor Caches" };
+                var devCacheSubgroup = new FindingSubgroup { CategoryName = "Development Caches" };
+                var tempFilesSubgroup = new FindingSubgroup { CategoryName = "Temporary Files" };
+                var installersSubgroup = new FindingSubgroup { CategoryName = "Installers & Downloads" };
+                var logsSubgroup = new FindingSubgroup { CategoryName = "Logs & Diagnostics" };
+                var systemActionsSubgroup = new FindingSubgroup { CategoryName = "System Actions" };
+                var otherSubgroup = new FindingSubgroup { CategoryName = "Other" };
+                var blockedSubgroup = new FindingSubgroup { CategoryName = "System Protected" };
+
+                var scoringService = new ScoringService();
+
+                foreach (var bucket in buckets)
+                {
+                    // Classify each item in the bucket
+                    var bucketClassifications = new Dictionary<SafetyClassification, int>();
+
+                    foreach (var item in bucket.Items)
+                    {
+                        var pathClassification = PathRules.ClassifyPath(item.Path);
+                        var scoringResult = scoringService.ScoreFile(item.Path, item.Size, item.LastModified);
+
+                        var findingItem = new FindingItem
+                        {
+                            Name = Path.GetFileName(item.Path) ?? item.Path,
+                            Path = item.Path,
+                            SizeBytes = item.Size,
+                            Classification = scoringResult.Classification,
+                            Reasons = scoringResult.Reasons,
+                            SourceReference = bucket
+                        };
+
+                        // Count classifications
+                        if (!bucketClassifications.ContainsKey(scoringResult.Classification))
+                            bucketClassifications[scoringResult.Classification] = 0;
+                        bucketClassifications[scoringResult.Classification]++;
+
+                        // Add to appropriate subgroup based on classification and category
+                        if (scoringResult.Classification == SafetyClassification.Blocked)
+                        {
+                            blockedSubgroup.Items.Add(findingItem);
+                        }
+                        else
+                        {
+                            // Categorize by type
+                            var category = DetermineCategoryFromPath(item.Path, pathClassification, scoringResult);
+                            switch (category)
+                            {
+                                case "VendorCache":
+                                    vendorCacheSubgroup.Items.Add(findingItem);
+                                    break;
+                                case "DevCache":
+                                    devCacheSubgroup.Items.Add(findingItem);
+                                    break;
+                                case "TempFiles":
+                                    tempFilesSubgroup.Items.Add(findingItem);
+                                    break;
+                                case "Installers":
+                                    installersSubgroup.Items.Add(findingItem);
+                                    break;
+                                case "Logs":
+                                    logsSubgroup.Items.Add(findingItem);
+                                    break;
+                                case "SystemActions":
+                                    systemActionsSubgroup.Items.Add(findingItem);
+                                    break;
+                                default:
+                                    otherSubgroup.Items.Add(findingItem);
+                                    break;
+                            }
+                        }
+                    }
+                }
+
+                // Add non-empty subgroups to appropriate groups
+                if (blockedSubgroup.Items.Any())
+                    systemCoreGroup.Subgroups.Add(blockedSubgroup);
+
+                if (vendorCacheSubgroup.Items.Any())
+                    optionalGroup.Subgroups.Add(vendorCacheSubgroup);
+                if (devCacheSubgroup.Items.Any())
+                    optionalGroup.Subgroups.Add(devCacheSubgroup);
+                if (tempFilesSubgroup.Items.Any())
+                    optionalGroup.Subgroups.Add(tempFilesSubgroup);
+                if (installersSubgroup.Items.Any())
+                    optionalGroup.Subgroups.Add(installersSubgroup);
+                if (logsSubgroup.Items.Any())
+                    optionalGroup.Subgroups.Add(logsSubgroup);
+                if (systemActionsSubgroup.Items.Any())
+                    optionalGroup.Subgroups.Add(systemActionsSubgroup);
+                if (otherSubgroup.Items.Any())
+                    optionalGroup.Subgroups.Add(otherSubgroup);
+
+                // Update UI on dispatcher thread
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    FindingGroups.Clear();
+                    if (systemCoreGroup.Subgroups.Any())
+                        FindingGroups.Add(systemCoreGroup);
+                    if (optionalGroup.Subgroups.Any())
+                        FindingGroups.Add(optionalGroup);
+                });
+            });
+        }
+
+        private string DetermineCategoryFromPath(string path, PathClassification pathClassification, ScoringResult scoringResult)
+        {
+            var pathLower = path.ToLowerInvariant();
+            var reasonsLower = string.Join(" ", scoringResult.Reasons).ToLowerInvariant();
+
+            // Vendor caches
+            if (reasonsLower.Contains("nvidia") || reasonsLower.Contains("chrome") || 
+                reasonsLower.Contains("firefox") || reasonsLower.Contains("edge") ||
+                reasonsLower.Contains("adobe") || reasonsLower.Contains("browser cache"))
+                return "VendorCache";
+
+            // Dev tool caches
+            if (reasonsLower.Contains("nuget") || reasonsLower.Contains("npm") ||
+                reasonsLower.Contains("gradle") || reasonsLower.Contains("maven") ||
+                reasonsLower.Contains("cargo") || reasonsLower.Contains("pip") ||
+                reasonsLower.Contains("node_modules") || reasonsLower.Contains("build artifact") ||
+                pathLower.Contains("\\.nuget\\") || pathLower.Contains("\\node_modules\\") ||
+                pathLower.Contains("\\.gradle\\") || pathLower.Contains("\\.m2\\"))
+                return "DevCache";
+
+            // Temp files
+            if (reasonsLower.Contains("temp") || reasonsLower.Contains("cache") ||
+                pathLower.Contains("\\temp\\") || pathLower.Contains("\\cache\\") ||
+                Path.GetExtension(path).ToLowerInvariant() is ".tmp" or ".temp" or ".bak")
+                return "TempFiles";
+
+            // Installers
+            if (reasonsLower.Contains("installer") || reasonsLower.Contains("download") ||
+                pathLower.Contains("\\downloads\\") ||
+                Path.GetExtension(path).ToLowerInvariant() is ".exe" or ".msi" or ".zip" or ".rar")
+                return "Installers";
+
+            // Logs
+            if (reasonsLower.Contains("log") || pathLower.Contains("\\logs\\") ||
+                Path.GetExtension(path).ToLowerInvariant() is ".log" or ".etl")
+                return "Logs";
+
+            // System actions (Windows Update, Error Reporting, etc.)
+            if (reasonsLower.Contains("windows update") || reasonsLower.Contains("error reporting") ||
+                reasonsLower.Contains("diagnostics") || pathLower.Contains("\\wer\\") ||
+                pathLower.Contains("\\diagnosis\\"))
+                return "SystemActions";
+
+            return "Other";
+        }
+
+        private bool CanExecuteCleanGroup(FindingGroup? group)
+        {
+            return group != null && !group.IsProtected && group.TotalItems > 0;
+        }
+
+        private bool CanExecuteCleanSubgroup(FindingSubgroup? subgroup)
+        {
+            return subgroup != null && subgroup.Items.Any();
+        }
+
+        private async Task ExecuteCleanGroupSafeAsync(FindingGroup? group)
+        {
+            if (group == null) return;
+
+            var safeItems = group.Subgroups
+                .SelectMany(s => s.Items)
+                .Where(i => i.Classification == SafetyClassification.Safe)
+                .ToList();
+
+            if (!safeItems.Any())
+            {
+                MessageBox.Show(
+                    "No safe items found in this group.",
+                    "No Safe Items",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            var totalSize = safeItems.Sum(i => i.SizeBytes);
+            var result = MessageBox.Show(
+                $"Clean Safe Items from {group.Name}?\n\n" +
+                $"This will clean {safeItems.Count} safe items ({FormatSize(totalSize)}).\n\n" +
+                $"Breakdown by category:\n" +
+                string.Join("\n", group.Subgroups
+                    .Where(s => s.Items.Any(i => i.Classification == SafetyClassification.Safe))
+                    .Select(s => $"• {s.CategoryName}: {s.Items.Count(i => i.Classification == SafetyClassification.Safe)} items")) +
+                $"\n\nAll items will be moved to quarantine and can be restored if needed.",
+                "Confirm Safe Cleanup",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            await CleanItemsAsync(safeItems, $"{group.Name} (Safe Only)");
+        }
+
+        private async Task ExecuteCleanGroupAllAsync(FindingGroup? group)
+        {
+            if (group == null) return;
+
+            var allItems = group.Subgroups.SelectMany(s => s.Items).ToList();
+            var safeCount = allItems.Count(i => i.Classification == SafetyClassification.Safe);
+            var cautionCount = allItems.Count(i => i.Classification == SafetyClassification.Caution);
+
+            var result = MessageBox.Show(
+                $"⚠️ Clean ALL Items from {group.Name}?\n\n" +
+                $"Total items: {allItems.Count}\n" +
+                $"• Safe: {safeCount}\n" +
+                $"• Caution: {cautionCount}\n" +
+                $"Total size: {FormatSize(allItems.Sum(i => i.SizeBytes))}\n\n" +
+                $"Caution items may include important data!\n" +
+                $"All items will be moved to quarantine.\n\n" +
+                "Are you sure you want to proceed?",
+                "⚠️ Confirm All Items Cleanup",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            // Second confirmation for caution items
+            if (cautionCount > 0)
+            {
+                var confirm2 = MessageBox.Show(
+                    $"Final Confirmation:\n\n" +
+                    $"You are about to clean {cautionCount} CAUTION items.\n" +
+                    $"These items may be important and could affect applications.\n\n" +
+                    "Continue?",
+                    "⚠️ Final Confirmation",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+
+                if (confirm2 != MessageBoxResult.Yes)
+                    return;
+            }
+
+            await CleanItemsAsync(allItems, $"{group.Name} (All Items)");
+        }
+
+        private async Task ExecuteCleanSubgroupAsync(FindingSubgroup? subgroup)
+        {
+            if (subgroup == null) return;
+
+            var safeCount = subgroup.Items.Count(i => i.Classification == SafetyClassification.Safe);
+            var cautionCount = subgroup.Items.Count(i => i.Classification == SafetyClassification.Caution);
+            var totalSize = subgroup.Items.Sum(i => i.SizeBytes);
+
+            var message = cautionCount > 0
+                ? $"⚠️ Clean {subgroup.CategoryName}?\n\n" +
+                  $"Total items: {subgroup.Items.Count}\n" +
+                  $"• Safe: {safeCount}\n" +
+                  $"• Caution: {cautionCount}\n" +
+                  $"Total size: {FormatSize(totalSize)}\n\n" +
+                  $"This includes {cautionCount} caution items that may be important.\n" +
+                  "Continue?"
+                : $"Clean {subgroup.CategoryName}?\n\n" +
+                  $"Items: {subgroup.Items.Count} (all safe)\n" +
+                  $"Size: {FormatSize(totalSize)}\n\n" +
+                  "All items will be moved to quarantine.";
+
+            var result = MessageBox.Show(
+                message,
+                cautionCount > 0 ? "⚠️ Confirm Cleanup" : "Confirm Cleanup",
+                MessageBoxButton.YesNo,
+                cautionCount > 0 ? MessageBoxImage.Warning : MessageBoxImage.Question);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            await CleanItemsAsync(subgroup.Items.ToList(), subgroup.CategoryName);
+        }
+
+        private async Task CleanItemsAsync(List<FindingItem> items, string groupName)
+        {
+            try
+            {
+                StatusText = $"Cleaning {items.Count} items from {groupName}...";
+
+                // Group items by their source bucket
+                var bucketGroups = items.GroupBy(i => i.SourceReference as CleanupBucket);
+
+                int totalSuccess = 0;
+                long totalReclaimed = 0;
+                var errors = new List<string>();
+
+                foreach (var bucketGroup in bucketGroups)
+                {
+                    var bucket = bucketGroup.Key;
+                    if (bucket == null) continue;
+
+                    // Get only the items from this bucket that we want to clean
+                    var itemsToClean = bucketGroup.Select(i => 
+                        bucket.Items.FirstOrDefault(bi => bi.Path == i.Path))
+                        .Where(bi => bi != null)
+                        .ToList();
+
+                    if (!itemsToClean.Any()) continue;
+
+                    // Create a temporary bucket with only these items
+                    var tempBucket = new CleanupBucket
+                    {
+                        Name = bucket.Name,
+                        Description = bucket.Description,
+                        Items = itemsToClean!,
+                        Status = bucket.Status
+                    };
+
+                    try
+                    {
+                        var actions = await _bucketsService.CleanBucketAsync(
+                            tempBucket,
+                            new Progress<string>(s => StatusText = s),
+                            CancellationToken.None);
+
+                        await _reportService.LogCleanupActionsAsync($"{groupName} - {bucket.Name}", actions);
+
+                        var successCount = actions.Count(a => a.Success);
+                        var reclaimedSize = actions.Where(a => a.Success).Sum(a => a.Size);
+
+                        totalSuccess += successCount;
+                        totalReclaimed += reclaimedSize;
+
+                        var failed = actions.Where(a => !a.Success).ToList();
+                        if (failed.Any())
+                        {
+                            errors.AddRange(failed.Select(f => $"{f.SourcePath}: {f.ErrorMessage}"));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        errors.Add($"{bucket.Name}: {ex.Message}");
+                    }
+                }
+
+                // Show results
+                if (errors.Any())
+                {
+                    var errorSummary = string.Join("\n", errors.Take(5));
+                    MessageBox.Show(
+                        $"Cleanup completed with some errors!\n\n" +
+                        $"Successfully cleaned: {totalSuccess} items\n" +
+                        $"Space reclaimed: {FormatSize(totalReclaimed)}\n" +
+                        $"Failed: {errors.Count} items\n\n" +
+                        $"First errors:\n{errorSummary}" +
+                        (errors.Count > 5 ? $"\n...and {errors.Count - 5} more" : ""),
+                        "Cleanup Completed with Errors",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+                else
+                {
+                    MessageBox.Show(
+                        $"Cleanup Complete!\n\n" +
+                        $"Cleaned: {totalSuccess} items\n" +
+                        $"Space reclaimed: {FormatSize(totalReclaimed)}\n\n" +
+                        "All items moved to quarantine.",
+                        "Cleanup Complete",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
+
+                // Refresh buckets and groups
+                await ExecuteScanBucketsAsync();
+
+                StatusText = $"Cleaned {totalSuccess} items from {groupName}";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Error during cleanup:\n{ex.Message}",
+                    "Cleanup Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+
+                StatusText = "Cleanup failed";
+            }
         }
 
         private static string FormatSize(long bytes)

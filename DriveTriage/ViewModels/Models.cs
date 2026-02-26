@@ -1,4 +1,5 @@
 using System.IO;
+using System.Collections.ObjectModel;
 
 namespace DriveTriage.ViewModels
 {
@@ -359,6 +360,86 @@ namespace DriveTriage.ViewModels
         public bool GoalAchievable => ProjectedFreeBytes >= TargetFreeBytes;
         public int SafeCandidatesCount => SelectedCandidates.Count(c => c.Risk == SafetyClassification.Safe);
         public int CautionCandidatesCount => SelectedCandidates.Count(c => c.Risk == SafetyClassification.Caution);
+
+        private static string FormatSize(long bytes)
+        {
+            string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+            double len = bytes;
+            int order = 0;
+            while (len >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                len /= 1024;
+            }
+            return $"{len:0.##} {sizes[order]}";
+        }
+    }
+
+    public class FindingGroup
+    {
+        public required string Name { get; init; }
+        public SafetyClassification Classification { get; init; }
+        public ObservableCollection<FindingSubgroup> Subgroups { get; init; } = new();
+        public long TotalBytes => Subgroups.Sum(s => s.TotalBytes);
+        public int TotalItems => Subgroups.Sum(s => s.Items.Count);
+        public string FormattedTotalSize => FormatSize(TotalBytes);
+        public bool IsProtected => Classification == SafetyClassification.Blocked;
+        public bool HasSafeItems => Subgroups.Any(s => s.Items.Any(i => i.Classification == SafetyClassification.Safe));
+        public bool HasCautionItems => Subgroups.Any(s => s.Items.Any(i => i.Classification == SafetyClassification.Caution));
+        public int SafeItemCount => Subgroups.Sum(s => s.Items.Count(i => i.Classification == SafetyClassification.Safe));
+        public int CautionItemCount => Subgroups.Sum(s => s.Items.Count(i => i.Classification == SafetyClassification.Caution));
+
+        private static string FormatSize(long bytes)
+        {
+            string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+            double len = bytes;
+            int order = 0;
+            while (len >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                len /= 1024;
+            }
+            return $"{len:0.##} {sizes[order]}";
+        }
+    }
+
+    public class FindingSubgroup
+    {
+        public required string CategoryName { get; init; }
+        public ObservableCollection<FindingItem> Items { get; init; } = new();
+        public long TotalBytes => Items.Sum(i => i.SizeBytes);
+        public string FormattedTotalSize => FormatSize(TotalBytes);
+
+        private static string FormatSize(long bytes)
+        {
+            string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+            double len = bytes;
+            int order = 0;
+            while (len >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                len /= 1024;
+            }
+            return $"{len:0.##} {sizes[order]}";
+        }
+    }
+
+    public class FindingItem
+    {
+        public required string Name { get; init; }
+        public required string Path { get; init; }
+        public long SizeBytes { get; init; }
+        public SafetyClassification Classification { get; init; }
+        public List<string> Reasons { get; init; } = new();
+        public required object SourceReference { get; init; } // Reference to CleanupBucket or other source
+        public string FormattedSize => FormatSize(SizeBytes);
+        public string ClassificationText => Classification switch
+        {
+            SafetyClassification.Safe => "✅ Safe",
+            SafetyClassification.Caution => "⚠️ Caution",
+            SafetyClassification.Blocked => "🚫 Blocked",
+            _ => "Unknown"
+        };
 
         private static string FormatSize(long bytes)
         {
