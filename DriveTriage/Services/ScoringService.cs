@@ -150,6 +150,155 @@ namespace DriveTriage.Services
                 reasons.Add("✅ Installer cache (re-downloaded when needed)");
             }
 
+            // Vendor cache patterns - NVIDIA
+            if (path.Contains("\\NVIDIA Corporation\\Downloader\\", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("\\NVIDIA Corporation\\NV_Cache\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 20;
+                reasons.Add("✅ NVIDIA driver/shader cache (regenerated automatically)");
+            }
+            else if (path.Contains("\\NVIDIA\\", StringComparison.OrdinalIgnoreCase) && 
+                     path.Contains("\\ProgramData\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 15;
+                reasons.Add("✅ NVIDIA program data cache");
+            }
+
+            // Vendor cache patterns - Browsers
+            if (path.Contains("\\Google\\Chrome\\User Data\\", StringComparison.OrdinalIgnoreCase) && 
+                path.Contains("\\Cache\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 20;
+                reasons.Add("✅ Chrome browser cache");
+            }
+            else if (path.Contains("\\Mozilla\\Firefox\\Profiles\\", StringComparison.OrdinalIgnoreCase) && 
+                     path.Contains("\\cache", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 20;
+                reasons.Add("✅ Firefox browser cache");
+            }
+            else if (path.Contains("\\Microsoft\\Edge\\User Data\\", StringComparison.OrdinalIgnoreCase) && 
+                     path.Contains("\\Cache\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 20;
+                reasons.Add("✅ Edge browser cache");
+            }
+
+            // Vendor cache patterns - Microsoft
+            if (path.Contains("\\ProgramData\\Microsoft\\Windows\\WER\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 15;
+                reasons.Add("✅ Windows Error Reporting cache");
+            }
+            else if (path.Contains("\\ProgramData\\Microsoft\\Diagnosis\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 15;
+                reasons.Add("✅ Windows diagnostics cache");
+            }
+            else if (path.Contains("\\Windows\\SoftwareDistribution\\Download\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 15;
+                reasons.Add("✅ Windows Update download cache");
+            }
+
+            // Vendor cache patterns - Adobe
+            if (path.Contains("\\Adobe\\", StringComparison.OrdinalIgnoreCase) && 
+                (path.Contains("\\Cache\\", StringComparison.OrdinalIgnoreCase) || 
+                 path.Contains("\\ARM\\", StringComparison.OrdinalIgnoreCase)))
+            {
+                score += 15;
+                reasons.Add("✅ Adobe application cache");
+            }
+
+            // ProgramData common patterns
+            if (path.Contains("\\ProgramData\\", StringComparison.OrdinalIgnoreCase))
+            {
+                if (path.Contains("\\Logs\\", StringComparison.OrdinalIgnoreCase) || 
+                    path.Contains("\\Log\\", StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 15;
+                    reasons.Add("✅ Application log files in ProgramData");
+                }
+                else if (path.Contains("\\Temp\\", StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 15;
+                    reasons.Add("✅ Temporary files in ProgramData");
+                }
+                else if (path.Contains("\\Crash", StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 15;
+                    reasons.Add("✅ Crash dumps in ProgramData");
+                }
+            }
+
+            // Development tool caches
+            if (path.Contains("\\.gradle\\caches\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 20;
+                reasons.Add("✅ Gradle build cache (re-downloaded on build)");
+            }
+            else if (path.Contains("\\.m2\\repository\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 20;
+                reasons.Add("✅ Maven repository cache (re-downloaded on build)");
+            }
+            else if (path.Contains("\\.npm\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 20;
+                reasons.Add("✅ npm package cache (restored with npm install)");
+            }
+            else if (path.Contains("\\.yarn\\cache\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 20;
+                reasons.Add("✅ Yarn package cache");
+            }
+            else if (path.Contains("\\.cargo\\registry\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 20;
+                reasons.Add("✅ Rust Cargo cache");
+            }
+            else if (path.Contains("\\go\\pkg\\mod\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 20;
+                reasons.Add("✅ Go module cache");
+            }
+            else if (path.Contains("\\__pycache__\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 20;
+                reasons.Add("✅ Python compiled bytecode cache");
+            }
+            else if (path.Contains("\\pip\\cache\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 20;
+                reasons.Add("✅ Python pip package cache");
+            }
+            else if (path.Contains("\\JetBrains\\", StringComparison.OrdinalIgnoreCase) && 
+                     path.Contains("\\caches\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 20;
+                reasons.Add("✅ JetBrains IDE cache (IntelliJ/Rider/PyCharm)");
+            }
+            else if (path.Contains("\\.vscode\\extensions\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 15;
+                reasons.Add("✅ VS Code extension cache");
+            }
+            else if (path.Contains("\\.docker\\", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 15;
+                reasons.Add("✅ Docker cache");
+            }
+
+            // Ensure executables/binaries are still penalized even in safe locations
+            if (BlockedExtensions.Contains(extension) && score > 50)
+            {
+                // Already penalized above, but add additional context
+                if (!reasons.Any(r => r.Contains("executable")))
+                {
+                    reasons.Add("⚠️ Executable/system file type requires extra caution");
+                }
+            }
+
             // Clamp score to 0-100
             score = Math.Clamp(score, 0, 100);
 
@@ -384,5 +533,196 @@ namespace DriveTriage.Services
             }
             return $"{len:0.##} {sizes[order]}";
         }
+
+#if DEBUG
+        /// <summary>
+        /// DEBUG-only self-check method to verify file scoring logic.
+        /// Tests representative file paths with different characteristics.
+        /// </summary>
+        public static void RunFileScoringCheck()
+        {
+            Console.WriteLine("=== ScoringService File Scoring Self-Check ===");
+            Console.WriteLine();
+
+            var service = new ScoringService();
+            var testDate = DateTime.Now.AddDays(-400); // ~13 months old
+            var recentDate = DateTime.Now.AddDays(-10);
+
+            var testCases = new[]
+            {
+                // Expected: Blocked (System files)
+                (Path: @"C:\Windows\System32\kernel32.dll", Size: 1024L * 1024, Date: testDate, Expected: SafetyClassification.Blocked),
+                (Path: @"C:\Windows\explorer.exe", Size: 5 * 1024L * 1024, Date: testDate, Expected: SafetyClassification.Blocked),
+
+                // Expected: Safe (Vendor caches - large, old)
+                (Path: @"C:\ProgramData\NVIDIA Corporation\Downloader\cache123.bin", Size: 500L * 1024 * 1024, Date: testDate, Expected: SafetyClassification.Safe),
+                (Path: @"C:\Users\Test\AppData\Local\Google\Chrome\User Data\Default\Cache\data_1", Size: 200L * 1024 * 1024, Date: testDate, Expected: SafetyClassification.Safe),
+                (Path: @"C:\ProgramData\SomeApp\Logs\application.log", Size: 100L * 1024 * 1024, Date: testDate, Expected: SafetyClassification.Safe),
+                (Path: @"C:\Windows\SoftwareDistribution\Download\update.cab", Size: 300L * 1024 * 1024, Date: testDate, Expected: SafetyClassification.Safe),
+
+                // Expected: Safe (Dev caches)
+                (Path: @"D:\Projects\MyApp\bin\Debug\MyApp.exe", Size: 50L * 1024 * 1024, Date: recentDate, Expected: SafetyClassification.Safe),
+                (Path: @"C:\Users\Test\.nuget\packages\newtonsoft.json\13.0.1\lib\Newtonsoft.Json.dll", Size: 600L * 1024, Date: testDate, Expected: SafetyClassification.Safe),
+                (Path: @"D:\Projects\webapp\node_modules\express\lib\express.js", Size: 150L * 1024, Date: testDate, Expected: SafetyClassification.Safe),
+                (Path: @"C:\Users\Test\.gradle\caches\modules-2\files-2.1\junit.jar", Size: 2L * 1024 * 1024, Date: testDate, Expected: SafetyClassification.Safe),
+                (Path: @"D:\Python\project\__pycache__\module.cpython-39.pyc", Size: 50L * 1024, Date: testDate, Expected: SafetyClassification.Safe),
+
+                // Expected: Caution (Program Files - executables)
+                (Path: @"C:\Program Files\MyApp\myapp.exe", Size: 10L * 1024 * 1024, Date: recentDate, Expected: SafetyClassification.Caution),
+                (Path: @"C:\Program Files (x86)\Game\game.exe", Size: 100L * 1024 * 1024, Date: testDate, Expected: SafetyClassification.Caution),
+
+                // Expected: Safe (Temp files - even if executable extension, should be safe due to location)
+                (Path: @"C:\Users\Test\AppData\Local\Temp\installer.exe", Size: 50L * 1024 * 1024, Date: testDate, Expected: SafetyClassification.Safe),
+                (Path: @"C:\Temp\backup.bak", Size: 200L * 1024 * 1024, Date: testDate, Expected: SafetyClassification.Safe),
+            };
+
+            int passed = 0;
+            int failed = 0;
+
+            foreach (var (path, size, date, expected) in testCases)
+            {
+                var result = service.ScoreFile(path, size, date);
+                var status = result.Classification == expected ? "✅ PASS" : "❌ FAIL";
+
+                if (result.Classification == expected)
+                {
+                    passed++;
+                    Console.WriteLine($"{status}: {Path.GetFileName(path)}");
+                    Console.WriteLine($"         Path: {path}");
+                    Console.WriteLine($"         Expected: {expected}, Got: {result.Classification} (Score: {result.Score})");
+                    Console.WriteLine($"         Reasons: {result.ReasonSummary.Split('\n')[0]}");
+                }
+                else
+                {
+                    failed++;
+                    Console.WriteLine($"{status}: {Path.GetFileName(path)}");
+                    Console.WriteLine($"         Path: {path}");
+                    Console.WriteLine($"         Expected: {expected}, Got: {result.Classification} (Score: {result.Score})");
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"         ⚠️ MISMATCH!");
+                    Console.ResetColor();
+                    Console.WriteLine($"         Reasons: {result.ReasonSummary.Replace("\n", "\n         ")}");
+                }
+                Console.WriteLine();
+            }
+
+            Console.WriteLine("=== Summary ===");
+            Console.WriteLine($"Total: {testCases.Length}");
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"Passed: {passed}");
+            Console.ResetColor();
+            if (failed > 0)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"Failed: {failed}");
+                Console.ResetColor();
+            }
+            Console.WriteLine();
+        }
+
+        /// <summary>
+        /// DEBUG-only self-check method to verify folder scoring logic.
+        /// Tests representative folder paths with different characteristics.
+        /// </summary>
+        public static void RunFolderScoringCheck()
+        {
+            Console.WriteLine("=== ScoringService Folder Scoring Self-Check ===");
+            Console.WriteLine();
+
+            var service = new ScoringService();
+            var oldDate = DateTime.Now.AddDays(-400);
+            var recentDate = DateTime.Now.AddDays(-15);
+
+            var testCases = new[]
+            {
+                // Expected: Blocked (System folders)
+                (Path: @"C:\Windows\System32", Size: 5L * 1024 * 1024 * 1024, Date: oldDate, FileCount: 5000, Expected: SafetyClassification.Blocked),
+
+                // Expected: Safe (Large dev cache folders)
+                (Path: @"D:\Projects\BigApp\node_modules", Size: 2L * 1024 * 1024 * 1024, Date: oldDate, FileCount: 50000, Expected: SafetyClassification.Safe),
+                (Path: @"C:\Users\Test\.nuget\packages", Size: 5L * 1024 * 1024 * 1024, Date: oldDate, FileCount: 10000, Expected: SafetyClassification.Safe),
+                (Path: @"D:\Projects\MyApp\bin", Size: 500L * 1024 * 1024, Date: recentDate, FileCount: 200, Expected: SafetyClassification.Safe),
+                (Path: @"C:\Users\Test\.gradle\caches", Size: 3L * 1024 * 1024 * 1024, Date: oldDate, FileCount: 20000, Expected: SafetyClassification.Safe),
+
+                // Expected: Safe (Vendor cache folders)
+                (Path: @"C:\ProgramData\NVIDIA Corporation\Downloader", Size: 800L * 1024 * 1024, Date: oldDate, FileCount: 100, Expected: SafetyClassification.Safe),
+                (Path: @"C:\Users\Test\AppData\Local\Google\Chrome\User Data\Default\Cache", Size: 1L * 1024 * 1024 * 1024, Date: oldDate, FileCount: 5000, Expected: SafetyClassification.Safe),
+                (Path: @"C:\ProgramData\MyApp\Logs", Size: 200L * 1024 * 1024, Date: oldDate, FileCount: 50, Expected: SafetyClassification.Safe),
+
+                // Expected: Caution (Program Files)
+                (Path: @"C:\Program Files\MyApp", Size: 500L * 1024 * 1024, Date: recentDate, FileCount: 100, Expected: SafetyClassification.Caution),
+                (Path: @"C:\Users\Test\AppData\Local\MyApp", Size: 200L * 1024 * 1024, Date: recentDate, FileCount: 50, Expected: SafetyClassification.Caution),
+            };
+
+            int passed = 0;
+            int failed = 0;
+
+            foreach (var (path, size, date, fileCount, expected) in testCases)
+            {
+                var result = service.ScoreFolder(path, size, date, fileCount);
+                var status = result.Classification == expected ? "✅ PASS" : "❌ FAIL";
+
+                if (result.Classification == expected)
+                {
+                    passed++;
+                    Console.WriteLine($"{status}: {Path.GetFileName(path)}");
+                    Console.WriteLine($"         Path: {path}");
+                    Console.WriteLine($"         Expected: {expected}, Got: {result.Classification} (Score: {result.Score})");
+                    Console.WriteLine($"         Reasons: {result.ReasonSummary.Split('\n')[0]}");
+                }
+                else
+                {
+                    failed++;
+                    Console.WriteLine($"{status}: {Path.GetFileName(path)}");
+                    Console.WriteLine($"         Path: {path}");
+                    Console.WriteLine($"         Expected: {expected}, Got: {result.Classification} (Score: {result.Score})");
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"         ⚠️ MISMATCH!");
+                    Console.ResetColor();
+                    Console.WriteLine($"         Reasons: {result.ReasonSummary.Replace("\n", "\n         ")}");
+                }
+                Console.WriteLine();
+            }
+
+            Console.WriteLine("=== Summary ===");
+            Console.WriteLine($"Total: {testCases.Length}");
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"Passed: {passed}");
+            Console.ResetColor();
+            if (failed > 0)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"Failed: {failed}");
+                Console.ResetColor();
+            }
+            Console.WriteLine();
+        }
+
+        /// <summary>
+        /// Run all self-checks.
+        /// </summary>
+        public static void RunAllSelfChecks()
+        {
+            Console.WriteLine("╔════════════════════════════════════════════════╗");
+            Console.WriteLine("║  DriveTriage Safety Intelligence Self-Check  ║");
+            Console.WriteLine("╔════════════════════════════════════════════════╗");
+            Console.WriteLine();
+
+            PathRules.RunSelfCheck();
+            Console.WriteLine();
+            Console.WriteLine("─────────────────────────────────────────────────");
+            Console.WriteLine();
+            RunFileScoringCheck();
+            Console.WriteLine();
+            Console.WriteLine("─────────────────────────────────────────────────");
+            Console.WriteLine();
+            RunFolderScoringCheck();
+            Console.WriteLine();
+            Console.WriteLine("╔════════════════════════════════════════════════╗");
+            Console.WriteLine("║          All Self-Checks Complete             ║");
+            Console.WriteLine("╚════════════════════════════════════════════════╝");
+        }
+#endif
     }
 }
+
