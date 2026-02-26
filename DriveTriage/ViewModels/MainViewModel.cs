@@ -17,6 +17,7 @@ namespace DriveTriage.ViewModels
         private readonly SystemCleanupService _systemCleanupService;
         private readonly DriverCacheService _driverCacheService;
         private readonly StorageSnapshotService _storageSnapshotService;
+        private readonly PlanService _planService;
         private CancellationTokenSource? _bucketsCancellationTokenSource;
         private CancellationTokenSource? _appsCancellationTokenSource;
         private double _progressValue;
@@ -33,6 +34,8 @@ namespace DriveTriage.ViewModels
         private bool _showCaution = true;
         private bool _showBlocked = true;
         private int _daysBackFilter = 7;
+        private long _targetFreeSpaceGB = 100;
+        private RecoveryPlan? _currentPlan;
 
         public MainViewModel()
         {
@@ -43,6 +46,7 @@ namespace DriveTriage.ViewModels
             _systemCleanupService = new SystemCleanupService();
             _driverCacheService = new DriverCacheService();
             _storageSnapshotService = new StorageSnapshotService();
+            _planService = new PlanService(_bucketsService, _appsService, _systemCleanupService, _driverCacheService);
 
             LargestFiles = new ObservableCollection<FileSystemItem>();
             LargestFolders = new ObservableCollection<FileSystemItem>();
@@ -53,6 +57,7 @@ namespace DriveTriage.ViewModels
             RestorableSessions = new ObservableCollection<CleanupSession>();
             AvailableDrives = new ObservableCollection<DriveInfo>();
             GrowthAlerts = new ObservableCollection<GrowthAlert>();
+            RecoveryCandidates = new ObservableCollection<RecoveryCandidate>();
 
             // Initialize commands BEFORE loading drives
             // This prevents NullReferenceException when SelectedDrive setter calls RaiseCanExecuteChanged
@@ -78,6 +83,8 @@ namespace DriveTriage.ViewModels
             CompareSnapshotsCommand = new AsyncRelayCommand(ExecuteCompareSnapshotsAsync, CanExecuteCompareSnapshots);
             AnalyzeWeeklyGrowthCommand = new AsyncRelayCommand(ExecuteAnalyzeWeeklyGrowthAsync, CanExecuteAnalyzeWeeklyGrowth);
             IgnoreGrowthAlertCommand = new AsyncRelayCommand<GrowthAlert>(ExecuteIgnoreGrowthAlertAsync, CanExecuteIgnoreGrowthAlert);
+            GeneratePlanCommand = new AsyncRelayCommand(ExecuteGeneratePlanAsync, CanExecuteGeneratePlan);
+            ExecuteSafePlanCommand = new AsyncRelayCommand(ExecuteSafePlanAsync, CanExecuteSafePlan);
 
             // Load drives AFTER commands are initialized
             // This is safe because SelectedDrive setter now has ScanCommand initialized
@@ -101,6 +108,7 @@ namespace DriveTriage.ViewModels
 
         private ObservableCollection<GrowthAlert> _allGrowthAlerts = new();
         public ObservableCollection<GrowthAlert> GrowthAlerts { get; }
+        public ObservableCollection<RecoveryCandidate> RecoveryCandidates { get; }
 
         public DriveInfo? SelectedDrive
         {
@@ -227,6 +235,26 @@ namespace DriveTriage.ViewModels
             }
         }
 
+        public long TargetFreeSpaceGB
+        {
+            get => _targetFreeSpaceGB;
+            set
+            {
+                _targetFreeSpaceGB = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public RecoveryPlan? CurrentPlan
+        {
+            get => _currentPlan;
+            set
+            {
+                _currentPlan = value;
+                OnPropertyChanged();
+            }
+        }
+
         public AsyncRelayCommand ScanCommand { get; }
         public AsyncRelayCommand CancelCommand { get; }
         public AsyncRelayCommand ScanBucketsCommand { get; }
@@ -249,6 +277,8 @@ namespace DriveTriage.ViewModels
         public AsyncRelayCommand CompareSnapshotsCommand { get; }
         public AsyncRelayCommand AnalyzeWeeklyGrowthCommand { get; }
         public AsyncRelayCommand<GrowthAlert> IgnoreGrowthAlertCommand { get; }
+        public AsyncRelayCommand GeneratePlanCommand { get; }
+        public AsyncRelayCommand ExecuteSafePlanCommand { get; }
 
         private bool CanExecuteScan()
         {
@@ -1561,6 +1591,216 @@ namespace DriveTriage.ViewModels
             }
             catch { }
             return size;
+        }
+
+        private async Task ExecuteGeneratePlanAsync()
+        {
+            if (SelectedDrive == null)
+            {
+                MessageBox.Show(
+                    "Please select a drive first.",
+                    "No Drive Selected",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            try
+            {
+                StatusText = "Generating recovery plan...";
+                IsScanning = true;
+
+                var targetFreeBytes = TargetFreeSpaceGB * 1024L * 1024L * 1024L;
+
+                var plan = await _planService.GeneratePlanAsync(
+                    SelectedDrive,
+                    targetFreeBytes,
+                    new Progress<string>(s => StatusText = s),
+                    CancellationToken.None);
+
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    CurrentPlan = plan;
+                    RecoveryCandidates.Clear();
+                    foreach (var candidate in plan.SelectedCandidates)
+                    {
+                        RecoveryCandidates.Add(candidate);
+                    }
+                });
+
+                if (plan.GoalAchievable)
+                {
+                    MessageBox.Show(
+                        $"Recovery Plan Generated!\n\n" +
+                        $"Current Free: {plan.FormattedCurrentFree}\n" +
+                        $"Target Free: {plan.FormattedTargetFree}\n" +
+                        $"Total Reclaimable: {plan.FormattedTotalReclaimable}\n" +
+                        $"Projected Free: {plan.FormattedProjectedFree}\n\n" +
+                        $"Safe Actions: {plan.SafeCandidatesCount}\n" +
+                        $"Caution Actions: {plan.CautionCandidatesCount}\n\n" +
+                        "Review the plan below and click 'Execute Safe Plan' to proceed.",
+                        "Plan Generated",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
+                else
+                {
+                    MessageBox.Show(
+                        $"Goal Cannot Be Fully Achieved\n\n" +
+                        $"Current Free: {plan.FormattedCurrentFree}\n" +
+                        $"Target Free: {plan.FormattedTargetFree}\n" +
+                        $"Available Reclaimable: {plan.FormattedTotalReclaimable}\n" +
+                        $"Remaining Gap: {plan.FormattedRemainingGap}\n\n" +
+                        $"The plan includes all available recovery candidates.\n" +
+                        "Consider:\n" +
+                        "• Moving files to another drive\n" +
+                        "• Uninstalling more applications\n" +
+                        "• Deleting personal files",
+                        "Goal Not Achievable",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+
+                StatusText = $"Plan ready: {RecoveryCandidates.Count} actions";
+                ExecuteSafePlanCommand.RaiseCanExecuteChanged();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Error generating plan:\n{ex.Message}",
+                    "Plan Generation Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+
+                StatusText = "Plan generation failed";
+            }
+            finally
+            {
+                IsScanning = false;
+                GeneratePlanCommand.RaiseCanExecuteChanged();
+            }
+        }
+
+        private bool CanExecuteGeneratePlan()
+        {
+            return !IsScanning && SelectedDrive != null;
+        }
+
+        private async Task ExecuteSafePlanAsync()
+        {
+            if (CurrentPlan == null || !CurrentPlan.SelectedCandidates.Any())
+            {
+                MessageBox.Show(
+                    "No plan available. Generate a plan first.",
+                    "No Plan",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            var safeCandidates = CurrentPlan.SelectedCandidates
+                .Where(c => c.Risk == SafetyClassification.Safe)
+                .ToList();
+
+            if (!safeCandidates.Any())
+            {
+                MessageBox.Show(
+                    "No safe actions in plan.\n\n" +
+                    "All candidates require caution. Please review them individually.",
+                    "No Safe Actions",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            var result = MessageBox.Show(
+                $"Execute Safe Plan?\n\n" +
+                $"This will execute {safeCandidates.Count} safe recovery actions:\n\n" +
+                string.Join("\n", safeCandidates.Select(c => $"• {c.Name} ({c.FormattedSize})")) +
+                $"\n\nEstimated recovery: {FormatSize(safeCandidates.Sum(c => c.EstimatedReclaimableBytes))}\n\n" +
+                "Caution items will be skipped and require manual review.",
+                "Confirm Safe Plan Execution",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            try
+            {
+                StatusText = "Executing safe plan...";
+                IsScanning = true;
+
+                var executionResult = await _planService.ExecuteSafePlanAsync(
+                    CurrentPlan,
+                    new Progress<string>(s => StatusText = s),
+                    CancellationToken.None);
+
+                if (executionResult.Success)
+                {
+                    MessageBox.Show(
+                        $"Safe Plan Executed Successfully!\n\n" +
+                        $"Actions completed: {executionResult.SuccessfulActions}\n" +
+                        $"Space reclaimed: {executionResult.FormattedTotalReclaimed}\n" +
+                        $"Duration: {executionResult.Duration}\n\n" +
+                        "Check the Restore tab to review cleanup sessions.",
+                        "Plan Execution Complete",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+
+                    // Refresh drive info
+                    if (SelectedDrive != null)
+                    {
+                        var refreshedDrive = DriveInfo.GetDrives()
+                            .FirstOrDefault(d => d.Name == SelectedDrive.Name);
+                        if (refreshedDrive != null)
+                        {
+                            SelectedDrive = refreshedDrive;
+                        }
+                    }
+
+                    // Clear plan
+                    CurrentPlan = null;
+                    RecoveryCandidates.Clear();
+                }
+                else
+                {
+                    var errors = string.Join("\n", executionResult.Errors.Take(5));
+                    MessageBox.Show(
+                        $"Plan Execution Completed with Errors\n\n" +
+                        $"Successful: {executionResult.SuccessfulActions}\n" +
+                        $"Failed: {executionResult.FailedActions}\n" +
+                        $"Reclaimed: {executionResult.FormattedTotalReclaimed}\n\n" +
+                        $"Errors:\n{errors}",
+                        "Execution Errors",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+
+                StatusText = "Plan execution complete";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Error executing plan:\n{ex.Message}",
+                    "Execution Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+
+                StatusText = "Plan execution failed";
+            }
+            finally
+            {
+                IsScanning = false;
+                ExecuteSafePlanCommand.RaiseCanExecuteChanged();
+                GeneratePlanCommand.RaiseCanExecuteChanged();
+            }
+        }
+
+        private bool CanExecuteSafePlan()
+        {
+            return !IsScanning && CurrentPlan != null && 
+                   CurrentPlan.SelectedCandidates.Any(c => c.Risk == SafetyClassification.Safe);
         }
 
         private static string FormatSize(long bytes)

@@ -1176,6 +1176,265 @@
                     </Grid>
                 </Grid>
             </TabItem>
+
+            <!-- Goal Planner Tab -->
+            <TabItem Header="Goal Planner">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Description -->
+                    <Border Grid.Row="0" 
+                            BorderBrush="#FFF3E0" 
+                            BorderThickness="2" 
+                            CornerRadius="5"
+                            Padding="15" 
+                            Margin="0,0,0,10"
+                            Background="#FFF3E0">
+                        <StackPanel>
+                            <TextBlock Text="🎯 Goal Planner" 
+                                       FontWeight="Bold" 
+                                       FontSize="16" 
+                                       Foreground="#E65100"
+                                       Margin="0,0,0,5"/>
+                            <TextBlock TextWrapping="Wrap" 
+                                       Foreground="#424242">
+                                <Run Text="Set a target free space goal (e.g., 100 GB) and let the Goal Planner generate an optimal recovery plan."/>
+                                <LineBreak/>
+                                <Run Text="The planner analyzes cleanup buckets, system actions (Recycle Bin, caches), and installed applications."/>
+                                <LineBreak/>
+                                <Run Text="Safe actions are prioritized first. Review and execute the plan with a single click."/>
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Control Panel -->
+                    <Grid Grid.Row="1" Margin="0,0,0,10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Input Section -->
+                        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Target Free Space (GB):" 
+                                       VerticalAlignment="Center" 
+                                       Margin="0,0,10,0"
+                                       FontWeight="SemiBold"/>
+                            <TextBox Width="80" Height="30" 
+                                     Text="{Binding TargetFreeSpaceGB, UpdateSourceTrigger=PropertyChanged}"
+                                     VerticalContentAlignment="Center"
+                                     HorizontalContentAlignment="Center"/>
+                            <Button Content="🎯 Generate Plan" Width="140" Height="35" Margin="20,0,10,0"
+                                    Command="{Binding GeneratePlanCommand}"
+                                    FontWeight="SemiBold"/>
+                            <Button Content="✅ Execute Safe Plan" Width="160" Height="35" Margin="0,0,10,0"
+                                    Command="{Binding ExecuteSafePlanCommand}"
+                                    FontWeight="SemiBold"
+                                    ToolTip="Execute only safe actions from the plan"/>
+                            <TextBlock Text="{Binding StatusText}" 
+                                       VerticalAlignment="Center" 
+                                       Margin="20,0,0,0"
+                                       FontWeight="SemiBold"/>
+                        </StackPanel>
+
+                        <!-- Plan Summary -->
+                        <Border Grid.Row="1" 
+                                BorderBrush="#E0E0E0" 
+                                BorderThickness="1" 
+                                CornerRadius="3"
+                                Padding="15"
+                                Background="#FAFAFA">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding CurrentPlan, Converter={StaticResource BoolToVisConverter}}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Current Free" Foreground="Gray" FontSize="11"/>
+                                    <TextBlock Text="{Binding CurrentPlan.FormattedCurrentFree}" 
+                                               FontSize="16" 
+                                               FontWeight="Bold"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="Target Free" Foreground="Gray" FontSize="11"/>
+                                    <TextBlock Text="{Binding CurrentPlan.FormattedTargetFree}" 
+                                               FontSize="16" 
+                                               FontWeight="Bold"
+                                               Foreground="#E65100"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Can Reclaim" Foreground="Gray" FontSize="11"/>
+                                    <TextBlock Text="{Binding CurrentPlan.FormattedTotalReclaimable}" 
+                                               FontSize="16" 
+                                               FontWeight="Bold"
+                                               Foreground="#2E7D32"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="3">
+                                    <TextBlock Text="Projected Free" Foreground="Gray" FontSize="11"/>
+                                    <TextBlock Text="{Binding CurrentPlan.FormattedProjectedFree}" 
+                                               FontSize="16" 
+                                               FontWeight="Bold"
+                                               Foreground="#1976D2"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+
+                    <!-- Info Panel -->
+                    <Border Grid.Row="2" 
+                            BorderBrush="#CCCCCC" 
+                            BorderThickness="1" 
+                            CornerRadius="3"
+                            Padding="10,5"
+                            Margin="0,0,0,10"
+                            Background="#E8F5E9">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="💡 Tip: " FontWeight="Bold" Foreground="#2E7D32"/>
+                            <TextBlock Text="Safe actions (✅) execute automatically. Caution items (⚠️) require manual review and confirmation." 
+                                       Foreground="#424242"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Recovery Candidates Section -->
+                    <Grid Grid.Row="3">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Section Header -->
+                        <TextBlock Grid.Row="0" 
+                                   Text="Recovery Plan Actions" 
+                                   FontSize="14" 
+                                   FontWeight="Bold" 
+                                   Margin="0,0,0,10"/>
+
+                        <!-- Empty State -->
+                        <StackPanel Grid.Row="1"
+                                    HorizontalAlignment="Center" 
+                                    VerticalAlignment="Center">
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding RecoveryCandidates.Count}" Value="0">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <TextBlock Text="🎯" FontSize="48" HorizontalAlignment="Center" Margin="0,0,0,20"/>
+                            <TextBlock Text="No plan generated yet" 
+                                       FontSize="16" 
+                                       Foreground="Gray"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,0,0,5"/>
+                            <TextBlock Text="Enter a target free space and click 'Generate Plan' to start" 
+                                       FontSize="12" 
+                                       Foreground="Gray"
+                                       HorizontalAlignment="Center"/>
+                        </StackPanel>
+
+                        <!-- Recovery Candidates DataGrid -->
+                        <DataGrid Grid.Row="1" 
+                                  ItemsSource="{Binding RecoveryCandidates}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  SelectionMode="Single"
+                                  CanUserSortColumns="True"
+                                  CanUserResizeColumns="True"
+                                  GridLinesVisibility="Horizontal"
+                                  AlternatingRowBackground="#F5F5F5">
+                            <DataGrid.Style>
+                                <Style TargetType="DataGrid">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding RecoveryCandidates.Count}" Value="0">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </DataGrid.Style>
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="✓" 
+                                                        Binding="{Binding IsSelected}" 
+                                                        Width="40">
+                                    <DataGridCheckBoxColumn.ElementStyle>
+                                        <Style TargetType="CheckBox">
+                                            <Setter Property="HorizontalAlignment" Value="Center"/>
+                                        </Style>
+                                    </DataGridCheckBoxColumn.ElementStyle>
+                                </DataGridCheckBoxColumn>
+                                <DataGridTextColumn Header="Risk" 
+                                                    Binding="{Binding RiskText}" 
+                                                    Width="80">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Center"/>
+                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Category" 
+                                                    Binding="{Binding Category}" 
+                                                    Width="120"/>
+                                <DataGridTextColumn Header="Action" 
+                                                    Binding="{Binding Name}" 
+                                                    Width="3*">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                            <Setter Property="ToolTip" Value="{Binding Name}"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Reclaimable" 
+                                                    Binding="{Binding FormattedSize}" 
+                                                    Width="100">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Right"/>
+                                            <Setter Property="Foreground" Value="#2E7D32"/>
+                                            <Setter Property="FontWeight" Value="Bold"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Type" 
+                                                    Binding="{Binding ActionKind}" 
+                                                    Width="120">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Center"/>
+                                            <Setter Property="Foreground" Value="Gray"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </Grid>
+            </TabItem>
         </TabControl>
     </Grid>
 </Window>

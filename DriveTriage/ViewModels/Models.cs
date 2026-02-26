@@ -301,4 +301,76 @@ namespace DriveTriage.ViewModels
             return $"{len:0.##} {sizes[order]}";
         }
     }
+
+    public class RecoveryCandidate
+    {
+        public required string Name { get; init; }
+        public required string Category { get; init; }
+        public long EstimatedReclaimableBytes { get; init; }
+        public SafetyClassification Risk { get; init; }
+        public ActionKind ActionKind { get; init; }
+        public required string ReferenceId { get; init; }
+        public bool IsSelected { get; set; }
+
+        public string FormattedSize => FormatSize(EstimatedReclaimableBytes);
+        public string RiskText => Risk switch
+        {
+            SafetyClassification.Safe => "✅ Safe",
+            SafetyClassification.Caution => "⚠️ Caution",
+            SafetyClassification.Blocked => "🚫 Blocked",
+            _ => "Unknown"
+        };
+
+        private static string FormatSize(long bytes)
+        {
+            string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+            double len = bytes;
+            int order = 0;
+            while (len >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                len /= 1024;
+            }
+            return $"{len:0.##} {sizes[order]}";
+        }
+    }
+
+    public enum ActionKind
+    {
+        CleanBucket,
+        SystemAction,
+        UninstallApp
+    }
+
+    public class RecoveryPlan
+    {
+        public long TargetFreeBytes { get; set; }
+        public long CurrentFreeBytes { get; set; }
+        public List<RecoveryCandidate> SelectedCandidates { get; set; } = new();
+        public long RemainingGapBytes { get; set; }
+
+        public string FormattedTargetFree => FormatSize(TargetFreeBytes);
+        public string FormattedCurrentFree => FormatSize(CurrentFreeBytes);
+        public string FormattedRemainingGap => FormatSize(RemainingGapBytes);
+        public long TotalReclaimableBytes => SelectedCandidates.Sum(c => c.EstimatedReclaimableBytes);
+        public string FormattedTotalReclaimable => FormatSize(TotalReclaimableBytes);
+        public long ProjectedFreeBytes => CurrentFreeBytes + TotalReclaimableBytes;
+        public string FormattedProjectedFree => FormatSize(ProjectedFreeBytes);
+        public bool GoalAchievable => ProjectedFreeBytes >= TargetFreeBytes;
+        public int SafeCandidatesCount => SelectedCandidates.Count(c => c.Risk == SafetyClassification.Safe);
+        public int CautionCandidatesCount => SelectedCandidates.Count(c => c.Risk == SafetyClassification.Caution);
+
+        private static string FormatSize(long bytes)
+        {
+            string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+            double len = bytes;
+            int order = 0;
+            while (len >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                len /= 1024;
+            }
+            return $"{len:0.##} {sizes[order]}";
+        }
+    }
 }
